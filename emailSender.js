@@ -277,6 +277,17 @@ const sendEmailsToAll = async (req, res) => {
       });
     }
 
+    // Remove duplicate email addresses
+    const uniqueEmails = [...new Set(emails)];
+    
+    // Log if any duplicates were found
+    if (uniqueEmails.length < emails.length) {
+      console.log(`Removed ${emails.length - uniqueEmails.length} duplicate email addresses`);
+    }
+    
+    // Use the unique emails list from now on
+    emails = uniqueEmails;
+
     if (emails.length === 0) {
       return res.status(400).json({
         success: false,
@@ -337,7 +348,7 @@ const sendEmailsToAll = async (req, res) => {
       // Add a delay after each email (except the last one)
       if (i < emailsToProcess.length - 1) {
         console.log(`Waiting 60 seconds before sending the next email...`);
-        await new Promise(resolve => setTimeout(resolve, 90000)); // 2000ms = 2 seconds (you might want to change this back to 60000)
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2000ms = 2 seconds (you might want to change this back to 60000)
       }
     }
 
@@ -383,7 +394,10 @@ const sendEmailsToAll = async (req, res) => {
       error: `Server error: ${error.message}`
     });
   }
-};const storage = multer.diskStorage({
+};
+
+
+const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, 'uploads');
     // Create directory if it doesn't exist
