@@ -360,14 +360,110 @@ const deleteAllEmails = async (req, res) => {
     }
   };
   
-  module.exports = {
-    toggleEmailStatus,
-    getPaginatedEmails,
-    getTestEmails,
-    getAllEmails,
-    healthCheck,
-    setupGuide,
-    deleteEmail,       // Add this new export
-    deleteAllEmails ,
-  };
 
+
+// Add this function to your controller file (where deleteEmail and deleteAllEmails are defined)
+
+const deleteDuplicateEmails = async (req, res) => {
+  try {
+    let source = 'database';
+    let deletedCount = 0;
+    
+    // Try to delete duplicates from Supabase
+    try {
+      // With Supabase, we need to first identify duplicates, then delete them
+      const { data, error } = await supabase
+        .from('emails')
+        .select('email, id')
+        .order('created_at', { ascending: true });
+      
+      if (error) {
+        if (error.code === '42P01') {
+          // Table doesn't exist, handle in-memory duplicates
+          const seenEmails = new Map();
+          const duplicateIds = [];
+          
+          // First pass: identify duplicates (keeping the oldest entries)
+          emailStorage.forEach(email => {
+            if (!seenEmails.has(email.email)) {
+              seenEmails.set(email.email, email.id);
+            } else {
+              duplicateIds.push(email.id);
+            }
+          });
+          
+          // Remove the duplicates
+          const initialLength = emailStorage.length;
+          emailStorage = emailStorage.filter(email => !duplicateIds.includes(email.id));
+          deletedCount = initialLength - emailStorage.length;
+          
+          source = 'memory';
+        } else {
+          // Other database error
+          throw error;
+        }
+      } else {
+        // Successfully retrieved data from database
+        // Group by email and keep the oldest entry (first in the sorted result)
+        const emailGroups = {};
+        const duplicateIds = [];
+        
+        data.forEach(record => {
+          const email = record.email.toLowerCase(); // Case-insensitive comparison
+          
+          if (!emailGroups[email]) {
+            emailGroups[email] = record.id;
+          } else {
+            duplicateIds.push(record.id);
+          }
+        });
+        
+        // Delete the duplicates if any were found
+        if (duplicateIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('emails')
+            .delete()
+            .in('id', duplicateIds);
+            
+          if (deleteError) throw deleteError;
+          
+          deletedCount = duplicateIds.length;
+        }
+      }
+      
+      // Return success response
+      return res.status(200).json({
+        success: true,
+        message: `${deletedCount} duplicate emails deleted successfully`,
+        source,
+        deletedCount
+      });
+      
+    } catch (dbError) {
+      console.error('Database error:', dbError);
+      return res.status(500).json({
+        success: false,
+        error: `Database error: ${dbError.message}`
+      });
+    }
+  } catch (error) {
+    console.error('Server error:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Server error: ${error.message}`
+    });
+  }
+};
+
+// Update your module.exports to include the new function
+module.exports = {
+  toggleEmailStatus,
+  getPaginatedEmails,
+  getTestEmails,
+  getAllEmails,
+  healthCheck,
+  setupGuide,
+  deleteEmail,
+  deleteAllEmails,
+  deleteDuplicateEmails, // Add the new function
+};
