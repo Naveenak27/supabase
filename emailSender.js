@@ -227,17 +227,8 @@ const sendEmailsToAll = async (req, res) => {
     }
 
     // Get data from request (could be JSON or form data)
-    let emailSubject, emailContent;
-    
-    if (req.file) {
-      // If there was a file upload, data is likely in form fields
-      emailSubject = req.body.subject;
-      emailContent = req.body.content;
-    } else {
-      // If no file, data is likely in JSON
-      emailSubject = req.body.subject;
-      emailContent = req.body.content;
-    }
+    const emailSubject = req.body.subject;
+    const emailContent = req.body.content;
     
     // Validate required fields
     if (!emailSubject || !emailContent) {
@@ -277,17 +268,6 @@ const sendEmailsToAll = async (req, res) => {
       });
     }
 
-    // Remove duplicate email addresses
-    const uniqueEmails = [...new Set(emails)];
-    
-    // Log if any duplicates were found
-    if (uniqueEmails.length < emails.length) {
-      console.log(`Removed ${emails.length - uniqueEmails.length} duplicate email addresses`);
-    }
-    
-    // Use the unique emails list from now on
-    emails = uniqueEmails;
-
     if (emails.length === 0) {
       return res.status(400).json({
         success: false,
@@ -312,24 +292,21 @@ const sendEmailsToAll = async (req, res) => {
     // Track campaign for logs
     const campaignId = Date.now().toString();
     
-    // First, filter out already sent emails
-    const emailsToProcess = [];
-    for (const email of emails) {
+    // Process each email - check if already sent first, then send if needed
+    for (let i = 0; i < emails.length; i++) {
+      const email = emails[i];
+      
+      // Check if this email + subject combination was already sent successfully
       const alreadySent = await checkIfEmailAlreadySent(email, emailSubject);
       
       if (alreadySent) {
+        // Skip this email as it was already sent successfully
         console.log(`⏭️ Skipping email to ${email}: already sent successfully`);
         results.skipped.push(email);
         // Log that we skipped this email
         await logEmailResult(email, emailSubject, 'skipped', 'Email already sent successfully');
-      } else {
-        emailsToProcess.push(email);
+        continue; // Skip to the next email
       }
-    }
-    
-    // Now send only the new emails
-    for (let i = 0; i < emailsToProcess.length; i++) {
-      const email = emailsToProcess[i];
       
       try {
         // Send the email
@@ -346,9 +323,9 @@ const sendEmailsToAll = async (req, res) => {
       }
       
       // Add a delay after each email (except the last one)
-      if (i < emailsToProcess.length - 1) {
-        console.log(`Waiting 60 seconds before sending the next email...`);
-        await new Promise(resolve => setTimeout(resolve, 90000)); // 2000ms = 2 seconds (you might want to change this back to 60000)
+      if (i < emails.length - 1) {
+        console.log(`Waiting 2 seconds before sending the next email...`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2000ms = 2 seconds
       }
     }
 
