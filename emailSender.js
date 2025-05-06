@@ -324,8 +324,8 @@ const sendEmailsToAll = async (req, res) => {
       
       // Add a delay after each email (except the last one)
       if (i < emails.length - 1) {
-        console.log(`Waiting 90 seconds before sending the next email...`);
-        await new Promise(resolve => setTimeout(resolve, 90000)); // 2000ms = 2 seconds
+        console.log(`Waiting 35 seconds before sending the next email...`);
+        await new Promise(resolve => setTimeout(resolve, 35000)); // 2000ms = 2 seconds
       }
     }
 
