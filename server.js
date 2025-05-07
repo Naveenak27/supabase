@@ -173,10 +173,21 @@ app.post('/api/emails', async (req, res) => {
  * POST /api/emails/:id/mark-replied
  */
 app.post('/api/emails/:id/mark-replied', async (req, res) => {
-  const emailId = req.params.id;
-  const { replied_at, notes, replied_by } = req.body;
-  
   try {
+    const emailId = req.params.id;
+    console.log(`Marking email ${emailId} as replied`);
+    
+    // First, check if email exists
+    const checkEmailQuery = 'SELECT * FROM emails WHERE id = $1';
+    const emailResult = await db.query(checkEmailQuery, [emailId]);
+    
+    if (emailResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Email not found'
+      });
+    }
+    
     // Begin transaction
     await db.query('BEGIN');
     
@@ -189,9 +200,9 @@ app.post('/api/emails/:id/mark-replied', async (req, res) => {
     
     const insertReplyValues = [
       emailId,
-      replied_at || new Date().toISOString(),
-      notes || null,
-      replied_by || null
+      req.body.replied_at || new Date().toISOString(),
+      req.body.notes || null,
+      req.body.replied_by || null
     ];
     
     const replyResult = await db.query(insertReplyQuery, insertReplyValues);
@@ -204,12 +215,7 @@ app.post('/api/emails/:id/mark-replied', async (req, res) => {
       RETURNING id, email, active, replied
     `;
     
-    const emailResult = await db.query(updateEmailQuery, [emailId]);
-    
-    if (emailResult.rows.length === 0) {
-      await db.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Email not found' });
-    }
+    const updateResult = await db.query(updateEmailQuery, [emailId]);
     
     // Commit transaction
     await db.query('COMMIT');
@@ -219,13 +225,18 @@ app.post('/api/emails/:id/mark-replied', async (req, res) => {
       message: 'Email marked as replied successfully',
       data: {
         replied_id: replyResult.rows[0].id,
-        email: emailResult.rows[0]
+        email: updateResult.rows[0]
       }
     });
     
   } catch (error) {
     // Rollback transaction on error
-    await db.query('ROLLBACK');
+    try {
+      await db.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Error rolling back transaction:', rollbackError);
+    }
+    
     console.error('Error marking email as replied:', error);
     return res.status(500).json({
       success: false,
