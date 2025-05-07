@@ -30,6 +30,27 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+// Add this at the top of your server.js with your other requires
+const { Pool } = require('pg');
+
+// Initialize database connection
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+// Add this somewhere after your database initialization but before your routes
+// This will log if the database connection is successful
+db.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('Database connection error:', err.stack);
+  } else {
+    console.log('Database connected successfully at:', res.rows[0].now);
+  }
+});
+
+// Make sure to export the db so it can be used in other files if needed
+module.exports = { db };
 
 // Improved CORS configuration
 app.use(cors({
