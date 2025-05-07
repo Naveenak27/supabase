@@ -5,9 +5,8 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-
 // Import controllers
-const { uploadFile,supabase, emailStorage } = require('./emailHandlers');
+const { uploadFile, supabase, emailStorage } = require('./emailHandlers');
 const {
   toggleEmailStatus,
   getPaginatedEmails,
@@ -16,46 +15,56 @@ const {
   healthCheck,
   setupGuide,
   deleteEmail,
-  deleteAllEmails,deleteDuplicateEmails
+  deleteAllEmails,
+  deleteDuplicateEmails
 } = require('./queryHandlers');
 
 const { 
   sendEmailsToAll, 
   getEmailLogs,
-  // Add these new imports for the delete functionality
   deleteEmailLog,
   deleteAllEmailLogs,
-  sendSingleEmail,batchDeleteLogs // Add this new import
+  sendSingleEmail,
+  batchDeleteLogs
 } = require('./emailSender');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-// Add this at the top of your server.js with your other requires
-const { Pool } = require('pg');
 
 // Initialize database connection
-const db = new Pool({
-  connectionString: process.env.SUPABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+// We'll only initialize the database if the pg module is available
+let db;
+try {
+  const { Pool } = require('pg');
+  db = new Pool({
+    connectionString: process.env.SUPABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  });
 
-// Add this somewhere after your database initialization but before your routes
-// This will log if the database connection is successful
-db.query('SELECT NOW()', (err, res) => {
-  if (err) {
-    console.error('Database connection error:', err.stack);
-  } else {
-    console.log('Database connected successfully at:', res.rows[0].now);
-  }
-});
+  // Test database connection
+  db.query('SELECT NOW()', (err, res) => {
+    if (err) {
+      console.error('Database connection error:', err.stack);
+    } else {
+      console.log('Database connected successfully at:', res.rows[0].now);
+    }
+  });
+} catch (error) {
+  console.warn('PostgreSQL module not available. Some features may be limited:', error.message);
+  // Create a mock db object to prevent errors when functions try to use it
+  db = {
+    query: () => Promise.resolve({ rows: [] }),
+    // Add other methods you might be using
+  };
+}
 
 // Make sure to export the db so it can be used in other files if needed
 module.exports = { db };
 
 // Improved CORS configuration
 app.use(cors({
-  origin: ["https://resume-sender.netlify.app",'http://localhost:3000', 'http://localhost:5173', '*'], // Add your frontend URLs
-  methods: ['GET', 'POST','PUT', 'DELETE','OPTIONS'], // Add DELETE to allowed methods
+  origin: ["https://resume-sender.netlify.app", 'http://localhost:3000', 'http://localhost:5173', '*'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -95,30 +104,34 @@ const apiRouter = express.Router();
 
 // Email query routes
 apiRouter.get('/emails/paginated', getPaginatedEmails);
-apiRouter.put('/api/emails/:id/toggle-status', toggleEmailStatus);
+apiRouter.put('/emails/:id/toggle-status', toggleEmailStatus);
 apiRouter.get('/emails/test', getTestEmails);
 apiRouter.get('/emails', getAllEmails);
-// Add this to your routes file or main server file
-app.put('/api/emails/:id/toggle-status', toggleEmailStatus);
+
 // Email upload route
 apiRouter.post('/upload', upload.single('file'), uploadFile);
 
 // Email sending routes
 apiRouter.post('/send-emails', sendEmailsToAll);
-apiRouter.post('/send-email', sendSingleEmail); // Add this new route
+apiRouter.post('/send-email', sendSingleEmail);
 
 // Email logs routes
 apiRouter.get('/logs', getEmailLogs);
 apiRouter.delete('/logs/:id', deleteEmailLog);
 apiRouter.delete('/logs', deleteAllEmailLogs);
 apiRouter.post('/logs/batch-delete', batchDeleteLogs);
-apiRouter.delete('/emails-duplicates', deleteDuplicateEmails); // Route for deleting duplicate emails
+apiRouter.delete('/emails-duplicates', deleteDuplicateEmails);
+
 // Delete routes
-apiRouter.delete('/emails/:id', deleteEmail); // Route for deleting single email
-apiRouter.delete('/emails-batch', deleteAllEmails); // Route for deleting all emails in batch
+apiRouter.delete('/emails/:id', deleteEmail);
+apiRouter.delete('/emails-batch', deleteAllEmails);
 
 // Mount API router
 app.use('/api', apiRouter);
+
+// Direct route for toggle email status (for backward compatibility)
+app.put('/api/emails/:id/toggle-status', toggleEmailStatus);
+
 // Add a single email
 app.post('/api/emails', async (req, res) => {
   try {
@@ -141,45 +154,52 @@ app.post('/api/emails', async (req, res) => {
     };
     
     try {
-      // Check if Supabase table exists
-      const { data, error } = await supabase
-        .from('emails')
-        .select('count')
-        .limit(1);
-      
-      // If there's a table error, use in-memory storage instead
-      if (error && error.code === '42P01') {
-        console.log('Table "emails" does not exist. Using in-memory storage instead.');
-        emailStorage.push(emailData);
+      // Check if we have a database connection and Supabase is available
+      if (db && supabase) {
+        // Check if Supabase table exists
+        const { data, error } = await supabase
+          .from('emails')
+          .select('count')
+          .limit(1);
         
-        return res.status(200).json({ 
-          success: true,
-          message: 'Email stored in memory (Supabase table missing)',
-          note: "The emails table doesn't exist in your Supabase database. Data stored in server memory."
-        });
-      } else if (error) {
-        console.error('Error checking Supabase:', error);
-        return res.status(500).json({ error: `Database error: ${error.message}` });
-      }
-      
-      // If we're here, the table exists, so insert the data
-      const { error: insertError } = await supabase
-        .from('emails')
-        .insert([emailData]);
-      
-      if (insertError) {
-        console.error('Error inserting data:', insertError);
-        return res.status(500).json({ error: `Database insertion error: ${insertError.message}` });
+        // If there's a table error, use in-memory storage instead
+        if (error && error.code === '42P01') {
+          console.log('Table "emails" does not exist. Using in-memory storage instead.');
+          emailStorage.push(emailData);
+          
+          return res.status(200).json({ 
+            success: true,
+            message: 'Email stored in memory (Supabase table missing)',
+            note: "The emails table doesn't exist in your Supabase database. Data stored in server memory."
+          });
+        } else if (error) {
+          console.error('Error checking Supabase:', error);
+          return res.status(500).json({ error: `Database error: ${error.message}` });
+        }
+        
+        // If we're here, the table exists, so insert the data
+        const { error: insertError } = await supabase
+          .from('emails')
+          .insert([emailData]);
+        
+        if (insertError) {
+          console.error('Error inserting data:', insertError);
+          return res.status(500).json({ error: `Database insertion error: ${insertError.message}` });
+        }
+      } else {
+        // Fallback to in-memory storage if no database connection
+        emailStorage.push(emailData);
+        console.log('Using in-memory storage due to missing database connection');
       }
       
       res.status(200).json({ 
         success: true,
-        message: 'Email successfully added to the database'
+        message: 'Email successfully added'
       });
       
     } catch (error) {
-      console.error('Error with Supabase operation:', error);
-      return res.status(500).json({ error: `Supabase operation error: ${error.message}` });
+      console.error('Error with storage operation:', error);
+      return res.status(500).json({ error: `Storage operation error: ${error.message}` });
     }
     
   } catch (error) {
@@ -187,7 +207,6 @@ app.post('/api/emails', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// Add these routes to your Express backend
 
 /**
  * Mark an email as replied
@@ -195,6 +214,14 @@ app.post('/api/emails', async (req, res) => {
  */
 app.post('/api/emails/:id/mark-replied', async (req, res) => {
   try {
+    // Check if database is available
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
     const emailId = req.params.id;
     console.log(`Marking email ${emailId} as replied`);
     
@@ -252,10 +279,12 @@ app.post('/api/emails/:id/mark-replied', async (req, res) => {
     
   } catch (error) {
     // Rollback transaction on error
-    try {
-      await db.query('ROLLBACK');
-    } catch (rollbackError) {
-      console.error('Error rolling back transaction:', rollbackError);
+    if (db) {
+      try {
+        await db.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Error rolling back transaction:', rollbackError);
+      }
     }
     
     console.error('Error marking email as replied:', error);
@@ -273,6 +302,14 @@ app.post('/api/emails/:id/mark-replied', async (req, res) => {
  */
 app.get('/api/replied-emails', async (req, res) => {
   try {
+    // Check if database is available
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
     const query = `
       SELECT re.id, re.email_id, re.replied_at, re.notes, re.replied_by, e.email 
       FROM replied_emails re
@@ -302,9 +339,16 @@ app.get('/api/replied-emails', async (req, res) => {
  * Add a filter to the main emails endpoint to get emails by replied status
  * GET /api/emails?replied=true|false
  */
-// Update your existing GET /api/emails route to include this filter
 app.get('/api/emails', async (req, res) => {
   try {
+    // Check if database is available
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
     let query = `SELECT * FROM emails`;
     let conditions = [];
     let values = [];
@@ -349,7 +393,6 @@ app.post('/send-emails', sendEmailsToAll);
 // System routes
 app.get('/health', healthCheck);
 app.get('/setup-guide', setupGuide);
-
 
 // Add an OPTIONS handler for preflight requests
 app.options('*', cors());
