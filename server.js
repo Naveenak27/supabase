@@ -166,6 +166,150 @@ app.post('/api/emails', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// Add these routes to your Express backend
+
+/**
+ * Mark an email as replied
+ * POST /api/emails/:id/mark-replied
+ */
+app.post('/api/emails/:id/mark-replied', async (req, res) => {
+  const emailId = req.params.id;
+  const { replied_at, notes, replied_by } = req.body;
+  
+  try {
+    // Begin transaction
+    await db.query('BEGIN');
+    
+    // Insert into replied_emails table
+    const insertReplyQuery = `
+      INSERT INTO replied_emails (email_id, replied_at, notes, replied_by)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    `;
+    
+    const insertReplyValues = [
+      emailId,
+      replied_at || new Date().toISOString(),
+      notes || null,
+      replied_by || null
+    ];
+    
+    const replyResult = await db.query(insertReplyQuery, insertReplyValues);
+    
+    // Update the replied status in emails table
+    const updateEmailQuery = `
+      UPDATE emails
+      SET replied = TRUE
+      WHERE id = $1
+      RETURNING id, email, active, replied
+    `;
+    
+    const emailResult = await db.query(updateEmailQuery, [emailId]);
+    
+    if (emailResult.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Email not found' });
+    }
+    
+    // Commit transaction
+    await db.query('COMMIT');
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Email marked as replied successfully',
+      data: {
+        replied_id: replyResult.rows[0].id,
+        email: emailResult.rows[0]
+      }
+    });
+    
+  } catch (error) {
+    // Rollback transaction on error
+    await db.query('ROLLBACK');
+    console.error('Error marking email as replied:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error marking email as replied',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get all replied emails with their details
+ * GET /api/replied-emails
+ */
+app.get('/api/replied-emails', async (req, res) => {
+  try {
+    const query = `
+      SELECT re.id, re.email_id, re.replied_at, re.notes, re.replied_by, e.email 
+      FROM replied_emails re
+      JOIN emails e ON re.email_id = e.id
+      ORDER BY re.replied_at DESC
+    `;
+    
+    const result = await db.query(query);
+    
+    return res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+    
+  } catch (error) {
+    console.error('Error fetching replied emails:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching replied emails',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Add a filter to the main emails endpoint to get emails by replied status
+ * GET /api/emails?replied=true|false
+ */
+// Update your existing GET /api/emails route to include this filter
+app.get('/api/emails', async (req, res) => {
+  try {
+    let query = `SELECT * FROM emails`;
+    let conditions = [];
+    let values = [];
+    let paramIndex = 1;
+    
+    // Check if replied filter is specified
+    if (req.query.replied !== undefined) {
+      const repliedValue = req.query.replied === 'true';
+      conditions.push(`replied = $${paramIndex}`);
+      values.push(repliedValue);
+      paramIndex++;
+    }
+    
+    // Add WHERE clause if conditions exist
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    
+    query += ` ORDER BY id DESC`;
+    
+    const result = await db.query(query, values);
+    
+    return res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+    
+  } catch (error) {
+    console.error('Error fetching emails:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching emails',
+      error: error.message
+    });
+  }
+});
 
 // Backward compatibility for direct routes (can be removed later)
 app.post('/send-emails', sendEmailsToAll);
