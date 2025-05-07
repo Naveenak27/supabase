@@ -594,42 +594,48 @@ const deleteEmailLog = async (req, res) => {
 // Delete all email logs
 const deleteAllEmailLogs = async (req, res) => {
   try {
-    // Delete from database
-    const { error } = await supabase
-      .from('email_logs')
-      .delete()
-      .gte('id', 0); // Delete all records
+    console.log('Starting deletion of all email logs...');
+    
+    // Use Supabase's most reliable approach - execute a raw SQL query
+    const { data, error } = await supabase.rpc('truncate_email_logs');
     
     if (error) {
       console.error('Error deleting all email logs:', error);
       
-      // Fallback to in-memory deletion if database fails
-      if (global.emailLogs) {
-        global.emailLogs = [];
-        return res.status(200).json({
-          success: true,
-          message: 'All logs deleted successfully from memory'
+      // Fallback approach if the RPC function isn't available
+      const { error: deleteError } = await supabase
+        .from('email_logs')
+        .delete();
+      
+      if (deleteError) {
+        console.error('Fallback deletion also failed:', deleteError);
+        return res.status(500).json({
+          success: false,
+          error: `Could not delete logs: ${deleteError.message}`
         });
       }
-      
-      return res.status(500).json({
-        success: false,
-        error: `Database error: ${error.message}`
-      });
     }
+    
+    // Clear in-memory logs as well to ensure consistency
+    if (global.emailLogs) {
+      global.emailLogs = [];
+    }
+    
+    console.log('Successfully deleted all email logs');
     
     return res.status(200).json({
       success: true,
-      message: 'All logs deleted successfully'
+      message: 'All email logs deleted successfully'
     });
   } catch (error) {
-    console.error('Server error:', error);
+    console.error('Server error during log deletion:', error);
     return res.status(500).json({
       success: false,
       error: `Server error: ${error.message}`
     });
   }
 };
+
 const batchDeleteLogs = async (req, res) => {
   try {
     const { ids } = req.body;
