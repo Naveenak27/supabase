@@ -34,7 +34,7 @@ const PORT = process.env.PORT || 5000;
 // Improved CORS configuration
 app.use(cors({
   origin: ["https://resume-sender.netlify.app",'http://localhost:3000', 'http://localhost:5173', '*'], // Add your frontend URLs
-  methods: ['GET', 'POST','PUT', 'DELETE'], // Add DELETE to allowed methods
+  methods: ['GET', 'POST','PUT', 'DELETE','OPTIONS'], // Add DELETE to allowed methods
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
