@@ -454,9 +454,98 @@ const deleteDuplicateEmails = async (req, res) => {
     });
   }
 };
+// Add this function to your controller file with the other email handling functions
+
+const markEmailAsReplied = async (req, res) => {
+  try {
+    const { emailId } = req.params;
+    const { notes } = req.body; // Optional notes about the reply
+    
+    if (!emailId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email ID is required'
+      });
+    }
+    
+    // First, verify the email exists
+    let emailExists = false;
+    let emailData = null;
+    
+    try {
+      // Try to get from Supabase
+      const { data, error } = await supabase
+        .from('emails')
+        .select('*')
+        .eq('id', emailId)
+        .single();
+      
+      if (error) {
+        if (error.code === '42P01') {
+          // Table doesn't exist, check in-memory storage
+          const emailIndex = emailStorage.findIndex(email => email.id === emailId);
+          
+          if (emailIndex !== -1) {
+            emailExists = true;
+            emailData = emailStorage[emailIndex];
+          }
+        } else {
+          throw error;
+        }
+      } else {
+        // Email found in database
+        emailExists = true;
+        emailData = data;
+      }
+      
+      if (!emailExists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Email not found'
+        });
+      }
+      
+      // Now add entry to replied_emails table
+      const replyData = {
+        email_id: emailId,
+        replied_at: new Date().toISOString(),
+        notes: notes || null,
+      };
+      
+      const { data: replyResult, error: replyError } = await supabase
+        .from('replied_emails')
+        .insert([replyData])
+        .select();
+      
+      if (replyError) {
+        throw replyError;
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Email marked as replied',
+        data: replyResult[0] || replyData
+      });
+      
+    } catch (dbError) {
+      console.error('Database error:', dbError);
+      return res.status(500).json({
+        success: false,
+        error: `Database error: ${dbError.message}`
+      });
+    }
+  } catch (error) {
+    console.error('Server error:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Server error: ${error.message}`
+    });
+  }
+};
 
 // Update your module.exports to include the new function
 module.exports = {
+  markEmailAsReplied,
   toggleEmailStatus,
   getPaginatedEmails,
   getTestEmails,
