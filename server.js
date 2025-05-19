@@ -16,7 +16,7 @@ const {
   healthCheck,
   setupGuide,
   deleteEmail,
-  deleteAllEmails,deleteDuplicateEmails
+  deleteAllEmails,deleteDuplicateEmails,markEmailAsReplied
 } = require('./queryHandlers');
 
 const { 
@@ -94,6 +94,10 @@ apiRouter.post('/logs/batch-delete', batchDeleteLogs);
 apiRouter.delete('/emails-duplicates', deleteDuplicateEmails); // Route for deleting duplicate emails
 // Delete routes
 apiRouter.delete('/emails/:id', deleteEmail); // Route for deleting single email
+
+
+// Add the new route for marking emails as replied
+apiRouter.post('/emails/:emailId/mark-replied', markEmailAsReplied);
 apiRouter.delete('/emails-batch', deleteAllEmails); // Route for deleting all emails in batch
 
 // Mount API router
