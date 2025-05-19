@@ -515,28 +515,53 @@ const markEmailAsReplied = async (req, res) => {
         });
       }
       
-      // Now add entry to replied_emails table with the actual email address
-      const replyData = {
+      // Create reply data with only the email_id field for now
+      let replyData = {
         email_id: emailId,
-        email_address: emailAddress, // Adding the actual email address
         replied_at: new Date().toISOString(),
         notes: notes || null,
       };
       
-      const { data: replyResult, error: replyError } = await supabase
-        .from('replied_emails')
-        .insert([replyData])
-        .select();
-      
-      if (replyError) {
-        throw replyError;
+      // Attempt to insert with email_address field
+      try {
+        const { data: replyResult, error: replyError } = await supabase
+          .from('replied_emails')
+          .insert([{...replyData, email_address: emailAddress}])
+          .select();
+        
+        if (replyError) {
+          // If there's an error about the email_address column, try without it
+          if (replyError.message && replyError.message.includes('email_address')) {
+            console.log('Email address column not found in replied_emails table. Adding record without email address.');
+            
+            const { data: fallbackResult, error: fallbackError } = await supabase
+              .from('replied_emails')
+              .insert([replyData])
+              .select();
+              
+            if (fallbackError) {
+              throw fallbackError;
+            }
+            
+            return res.status(200).json({
+              success: true,
+              message: 'Email marked as replied (without email address - table needs migration)',
+              data: fallbackResult[0] || replyData,
+              missingColumn: true
+            });
+          } else {
+            throw replyError;
+          }
+        }
+        
+        return res.status(200).json({
+          success: true,
+          message: 'Email marked as replied with email address',
+          data: replyResult[0] || {...replyData, email_address: emailAddress}
+        });
+      } catch (insertError) {
+        throw insertError;
       }
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Email marked as replied',
-        data: replyResult[0] || replyData
-      });
       
     } catch (dbError) {
       console.error('Database error:', dbError);
