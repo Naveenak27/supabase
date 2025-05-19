@@ -505,9 +505,20 @@ const markEmailAsReplied = async (req, res) => {
         });
       }
       
-      // Now add entry to replied_emails table
+      // Get the actual email address from the emailData
+      const emailAddress = emailData.email_address || emailData.emailAddress || emailData.email || null;
+      
+      if (!emailAddress) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email address not found in the record'
+        });
+      }
+      
+      // Now add entry to replied_emails table with the actual email address
       const replyData = {
         email_id: emailId,
+        email_address: emailAddress, // Adding the actual email address
         replied_at: new Date().toISOString(),
         notes: notes || null,
       };
@@ -542,7 +553,6 @@ const markEmailAsReplied = async (req, res) => {
     });
   }
 };
-
 // Update your module.exports to include the new function
 module.exports = {
   markEmailAsReplied,
