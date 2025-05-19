@@ -459,7 +459,7 @@ const deleteDuplicateEmails = async (req, res) => {
 const markEmailAsReplied = async (req, res) => {
   try {
     const { emailId } = req.params;
-    const { notes } = req.body; // Optional notes about the reply
+    const { notes, emailAddress: providedEmailAddress } = req.body; // Optional manual email address
     
     if (!emailId) {
       return res.status(400).json({
@@ -475,70 +475,122 @@ const markEmailAsReplied = async (req, res) => {
       notes: notes || null,
     };
     
-    // Check if email exists in emails table, but don't make it a requirement
-    try {
-      const { data, error } = await supabase
-        .from('emails')
-        .select('id, email_address, email')
-        .eq('id', emailId)
-        .single();
-      
-      // If email exists, add its address to the reply record
-      if (!error && data) {
-        const emailAddress = data.email_address || data.email || null;
-        if (emailAddress) {
-          replyData.email_address = emailAddress;
-        }
-      }
-      
-      // Insert into replied_emails regardless of whether the email exists
+    // Use email address from request body if provided
+    if (providedEmailAddress && typeof providedEmailAddress === 'string' && providedEmailAddress.includes('@')) {
+      replyData.email_address = providedEmailAddress;
+      console.log('Using provided email address:', providedEmailAddress);
+    } else {
+      // Try to find email address from the emails table
       try {
-        // First try with email_address if we have it
-        if (replyData.email_address) {
-          const { data: replyResult, error: replyError } = await supabase
-            .from('replied_emails')
-            .insert([replyData])
-            .select();
+        // First try with a full select to get all possible fields
+        const { data: fullData, error: fullError } = await supabase
+          .from('emails')
+          .select('*')
+          .eq('id', emailId)
+          .single();
+        
+        if (!fullError && fullData) {
+          console.log('Full email data found:', JSON.stringify(fullData));
           
-          if (!replyError) {
-            return res.status(200).json({
-              success: true,
-              message: 'Email marked as replied with email address',
-              data: replyResult[0] || replyData
-            });
-          } else if (replyError.message && replyError.message.includes('email_address')) {
-            // Column doesn't exist, remove it and try again
-            delete replyData.email_address;
+          // Try common email field names first
+          const commonFields = ['email_address', 'email', 'emailAddress', 'sender', 'from', 'recipient'];
+          let foundEmailAddress = null;
+          
+          // Check common fields first
+          for (const field of commonFields) {
+            if (fullData[field] && typeof fullData[field] === 'string' && fullData[field].includes('@')) {
+              foundEmailAddress = fullData[field];
+              console.log(`Found email address in field '${field}':`, foundEmailAddress);
+              break;
+            }
+          }
+          
+          // If not found in common fields, scan all string fields
+          if (!foundEmailAddress) {
+            for (const [key, value] of Object.entries(fullData)) {
+              if (typeof value === 'string' && value.includes('@')) {
+                foundEmailAddress = value;
+                console.log(`Found email address in field '${key}':`, foundEmailAddress);
+                break;
+              }
+            }
+          }
+          
+          if (foundEmailAddress) {
+            replyData.email_address = foundEmailAddress;
           } else {
-            throw replyError; // Other error
+            console.warn('Could not find email address in the data');
+          }
+        } else if (fullError) {
+          console.warn('Error fetching email data:', fullError.message);
+          
+          // Check in-memory storage if database fails
+          if (typeof emailStorage !== 'undefined') {
+            const emailData = emailStorage.find(email => email.id === emailId);
+            if (emailData) {
+              const emailAddress = emailData.email_address || emailData.email || emailData.emailAddress || null;
+              if (emailAddress) {
+                replyData.email_address = emailAddress;
+                console.log('Found email address in memory storage:', emailAddress);
+              }
+            }
           }
         }
-        
-        // Insert without email_address (either because we don't have it or column doesn't exist)
-        const { data: fallbackResult, error: fallbackError } = await supabase
+      } catch (lookupError) {
+        console.warn('Error looking up email:', lookupError.message);
+        // Continue without email address if lookup fails
+      }
+    }
+    
+    // Insert reply record - first try with email_address if we have it
+    if (replyData.email_address) {
+      try {
+        const { data: replyResult, error: replyError } = await supabase
           .from('replied_emails')
           .insert([replyData])
           .select();
-          
-        if (fallbackError) {
-          throw fallbackError;
+        
+        if (!replyError) {
+          return res.status(200).json({
+            success: true,
+            message: 'Email marked as replied with email address',
+            data: replyResult[0] || replyData
+          });
+        } else if (replyError.message && replyError.message.includes('email_address')) {
+          // Column doesn't exist, remove it and try again
+          console.log('email_address column not found, removing from data');
+          delete replyData.email_address;
+        } else {
+          throw replyError; // Other error
         }
-        
-        return res.status(200).json({
-          success: true,
-          message: 'Email marked as replied',
-          data: fallbackResult[0] || replyData
-        });
-        
       } catch (insertError) {
-        throw insertError;
+        console.error('Error inserting with email address:', insertError.message);
+        // Try without email_address if insert fails
+        delete replyData.email_address;
+      }
+    }
+    
+    // Insert without email_address
+    try {
+      const { data: fallbackResult, error: fallbackError } = await supabase
+        .from('replied_emails')
+        .insert([replyData])
+        .select();
+        
+      if (fallbackError) {
+        throw fallbackError;
       }
       
-    } catch (dbError) {
-      console.error('Database error:', dbError);
+      return res.status(200).json({
+        success: true,
+        message: 'Email marked as replied (without email address)',
+        data: fallbackResult[0] || replyData
+      });
+    } catch (finalError) {
+      console.error('Final insertion error:', finalError);
       return res.status(500).json({
         success: false,
-        error: `Database error: ${dbError.message}`
+        error: `Database error: ${finalError.message}`
       });
     }
   } catch (error) {
