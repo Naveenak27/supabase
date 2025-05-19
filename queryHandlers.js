@@ -468,97 +468,68 @@ const markEmailAsReplied = async (req, res) => {
       });
     }
     
-    // First, verify the email exists
-    let emailExists = false;
-    let emailData = null;
+    // Create reply data
+    let replyData = {
+      email_id: emailId,
+      replied_at: new Date().toISOString(),
+      notes: notes || null,
+    };
     
+    // Check if email exists in emails table, but don't make it a requirement
     try {
-      // Try to get from Supabase
       const { data, error } = await supabase
         .from('emails')
-        .select('*')
+        .select('id, email_address, email')
         .eq('id', emailId)
         .single();
       
-      if (error) {
-        if (error.code === '42P01') {
-          // Table doesn't exist, check in-memory storage
-          const emailIndex = emailStorage.findIndex(email => email.id === emailId);
-          
-          if (emailIndex !== -1) {
-            emailExists = true;
-            emailData = emailStorage[emailIndex];
-          }
-        } else {
-          throw error;
+      // If email exists, add its address to the reply record
+      if (!error && data) {
+        const emailAddress = data.email_address || data.email || null;
+        if (emailAddress) {
+          replyData.email_address = emailAddress;
         }
-      } else {
-        // Email found in database
-        emailExists = true;
-        emailData = data;
       }
       
-      if (!emailExists) {
-        return res.status(404).json({
-          success: false,
-          error: 'Email not found'
-        });
-      }
-      
-      // Get the actual email address from the emailData
-      const emailAddress = emailData.email_address || emailData.emailAddress || emailData.email || null;
-      
-      if (!emailAddress) {
-        return res.status(400).json({
-          success: false,
-          error: 'Email address not found in the record'
-        });
-      }
-      
-      // Create reply data with only the email_id field for now
-      let replyData = {
-        email_id: emailId,
-        replied_at: new Date().toISOString(),
-        notes: notes || null,
-      };
-      
-      // Attempt to insert with email_address field
+      // Insert into replied_emails regardless of whether the email exists
       try {
-        const { data: replyResult, error: replyError } = await supabase
-          .from('replied_emails')
-          .insert([{...replyData, email_address: emailAddress}])
-          .select();
-        
-        if (replyError) {
-          // If there's an error about the email_address column, try without it
-          if (replyError.message && replyError.message.includes('email_address')) {
-            console.log('Email address column not found in replied_emails table. Adding record without email address.');
-            
-            const { data: fallbackResult, error: fallbackError } = await supabase
-              .from('replied_emails')
-              .insert([replyData])
-              .select();
-              
-            if (fallbackError) {
-              throw fallbackError;
-            }
-            
+        // First try with email_address if we have it
+        if (replyData.email_address) {
+          const { data: replyResult, error: replyError } = await supabase
+            .from('replied_emails')
+            .insert([replyData])
+            .select();
+          
+          if (!replyError) {
             return res.status(200).json({
               success: true,
-              message: 'Email marked as replied (without email address - table needs migration)',
-              data: fallbackResult[0] || replyData,
-              missingColumn: true
+              message: 'Email marked as replied with email address',
+              data: replyResult[0] || replyData
             });
+          } else if (replyError.message && replyError.message.includes('email_address')) {
+            // Column doesn't exist, remove it and try again
+            delete replyData.email_address;
           } else {
-            throw replyError;
+            throw replyError; // Other error
           }
+        }
+        
+        // Insert without email_address (either because we don't have it or column doesn't exist)
+        const { data: fallbackResult, error: fallbackError } = await supabase
+          .from('replied_emails')
+          .insert([replyData])
+          .select();
+          
+        if (fallbackError) {
+          throw fallbackError;
         }
         
         return res.status(200).json({
           success: true,
-          message: 'Email marked as replied with email address',
-          data: replyResult[0] || {...replyData, email_address: emailAddress}
+          message: 'Email marked as replied',
+          data: fallbackResult[0] || replyData
         });
+        
       } catch (insertError) {
         throw insertError;
       }
