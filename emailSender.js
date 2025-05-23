@@ -214,225 +214,16 @@ const getEmailLogs = async (req, res) => {
   }
 };
 // Controller for sending emails to all recipients in DB
-// const sendEmailsToAll = async (req, res) => {
-//   try {
-//     // First, process any file upload (resume)
-//     try {
-//       await processFileUpload(req, res);
-//     } catch (uploadError) {
-//       return res.status(400).json({
-//         success: false,
-//         error: `File upload error: ${uploadError.message}`
-//       });
-//     }
-
-//     // Get data from request (could be JSON or form data)
-//     const emailSubject = req.body.subject;
-//     const emailContent = req.body.content;
-    
-//     // Validate required fields
-//     if (!emailSubject || !emailContent) {
-//       return res.status(400).json({
-//         success: false,
-//         error: 'Email subject and content are required'
-//       });
-//     }
-
-//     // Get the resume file path (if any)
-//     const resumePath = req.file ? req.file.path : null;
-
-//     // Get all ACTIVE emails from database or memory (only where active = 1)
-//     let emails = [];
-//     try {
-//       const { data, error } = await supabase
-//         .from('emails')
-//         .select('email')
-//         .eq('active', 1); // Only select emails where active = 1
-      
-//       if (error && error.code === '42P01') {
-//         // Table doesn't exist, use in-memory data but filter by active status
-//         emails = emailStorage
-//           .filter(item => item.active === 1) // Only include active emails
-//           .map(item => item.email);
-//       } else if (error) {
-//         throw error;
-//       } else {
-//         // Database data
-//         emails = data.map(item => item.email);
-//       }
-//     } catch (dbError) {
-//       console.error('Database error:', dbError);
-//       return res.status(500).json({
-//         success: false,
-//         error: `Database error: ${dbError.message}`
-//       });
-//     }
-
-//     if (emails.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         error: 'No active emails found to send to'
-//       });
-//     }
-
-//     console.log(`Preparing to send emails to ${emails.length} active recipients`);
-//     console.log(`Email subject: ${emailSubject}`);
-//     console.log(`Email content: ${emailContent.substring(0, 100)}...`);
-//     if (resumePath) {
-//       console.log(`Attaching resume: ${resumePath}`);
-//     }
-
-//     // Track results
-//     const results = { 
-//       success: [], 
-//       failed: [],
-//       skipped: [] // Track skipped emails
-//     };
-    
-//     // Track campaign for logs
-//     const campaignId = Date.now().toString();
-    
-//     // Process each email - check if already sent first, then send if needed
-//     for (let i = 0; i < emails.length; i++) {
-//       const email = emails[i];
-      
-//       // Check if this email + subject combination was already sent successfully
-//       const alreadySent = await checkIfEmailAlreadySent(email, emailSubject);
-      
-//       if (alreadySent) {
-//         // Skip this email as it was already sent successfully
-//         console.log(`⏭️ Skipping email to ${email}: already sent successfully`);
-//         results.skipped.push(email);
-//         // Log that we skipped this email
-//         await logEmailResult(email, emailSubject, 'skipped', 'Email already sent successfully');
-//         continue; // Skip to the next email
-//       }
-      
-//       try {
-//         // Send the email
-//         await sendEmail(email, emailSubject, emailContent, resumePath);
-//         results.success.push(email);
-//         console.log(`✅ Email sent successfully to: ${email}`);
-//         // Log successful email
-//         await logEmailResult(email, emailSubject, 'success');
-//       } catch (error) {
-//         console.error(`❌ Failed to send email to ${email}:`, error.message);
-//         results.failed.push({ email, error: error.message });
-//         // Log failed email
-//         await logEmailResult(email, emailSubject, 'failed', error.message);
-//       }
-      
-//       // Add a delay after each email (except the last one)
-//       if (i < emails.length - 1) {
-//         console.log(`Waiting 35 seconds before sending the next email...`);
-//         await new Promise(resolve => setTimeout(resolve, 35000)); // 2000ms = 2 seconds
-//       }
-//     }
-
-//     // Log the campaign summary
-//     await logEmailResult(
-//       process.env.SMTP_USER, 
-//       `Campaign Summary: ${emailSubject}`,
-//       'campaign_summary', 
-//       JSON.stringify({
-//         campaignId,
-//         totalEmails: emails.length,
-//         successful: results.success.length,
-//         failed: results.failed.length,
-//         skipped: results.skipped.length
-//       })
-//     );
-
-//     // Clean up the resume file after sending if it exists
-//     if (resumePath && fs.existsSync(resumePath)) {
-//       try {
-//         fs.unlinkSync(resumePath);
-//         console.log(`Deleted temporary file: ${resumePath}`);
-//       } catch (deleteError) {
-//         console.error(`Error deleting file: ${deleteError.message}`);
-//       }
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       sentCount: results.success.length,
-//       failedCount: results.failed.length,
-//       skippedCount: results.skipped.length,
-//       totalAttempted: emails.length,
-//       campaignId,
-//       failedEmails: results.failed.length > 0 ? results.failed : undefined,
-//       skippedEmails: results.skipped.length > 0 ? results.skipped : undefined
-//     });
-    
-//   } catch (error) {
-//     console.error('Server error:', error);
-//     return res.status(500).json({
-//       success: false,
-//       error: `Server error: ${error.message}`
-//     });
-//   }
-// };
-
-
-// const storage = multer.diskStorage({
-//   destination: function (req, file, cb) {
-//     const uploadDir = path.join(__dirname, 'uploads');
-//     // Create directory if it doesn't exist
-//     if (!fs.existsSync(uploadDir)) {
-//       fs.mkdirSync(uploadDir, { recursive: true });
-//     }
-//     cb(null, uploadDir);
-//   },
-//   filename: function (req, file, cb) {
-//     // Create a unique filename
-//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-//     cb(null, uniqueSuffix + '-' + file.originalname);
-//   }
-// });
-
-// const upload = multer({ 
-//   storage: storage,
-//   limits: {
-//     fileSize: 10 * 1024 * 1024, // 10MB file size limit
-//   },
-//   fileFilter: (req, file, cb) => {
-//     // Accept only PDF and Word documents
-//     if (
-//       file.mimetype === 'application/pdf' || 
-//       file.mimetype === 'application/msword' || 
-//       file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-//     ) {
-//       cb(null, true);
-//     } else {
-//       cb(new Error('Only PDF and Word documents are allowed'));
-//     }
-//   }
-// });
-
-// // Define the middleware to handle file uploads
-// const uploadMiddleware = upload.single('file');
-
-
-
-
-
-
-
 const sendEmailsToAll = async (req, res) => {
   try {
-    // Only process file upload if it's a multipart form request
-    const isMultipartForm = req.headers['content-type'] && 
-                           req.headers['content-type'].includes('multipart/form-data');
-    
-    if (isMultipartForm) {
-      try {
-        await processFileUpload(req, res);
-      } catch (uploadError) {
-        return res.status(400).json({
-          success: false,
-          error: `File upload error: ${uploadError.message}`
-        });
-      }
+    // First, process any file upload (resume)
+    try {
+      await processFileUpload(req, res);
+    } catch (uploadError) {
+      return res.status(400).json({
+        success: false,
+        error: `File upload error: ${uploadError.message}`
+      });
     }
 
     // Get data from request (could be JSON or form data)
@@ -534,7 +325,7 @@ const sendEmailsToAll = async (req, res) => {
       // Add a delay after each email (except the last one)
       if (i < emails.length - 1) {
         console.log(`Waiting 35 seconds before sending the next email...`);
-        await new Promise(resolve => setTimeout(resolve, 35000)); // 35000ms = 35 seconds
+        await new Promise(resolve => setTimeout(resolve, 35000)); // 2000ms = 2 seconds
       }
     }
 
@@ -581,6 +372,47 @@ const sendEmailsToAll = async (req, res) => {
     });
   }
 };
+
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, 'uploads');
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Create a unique filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB file size limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only PDF and Word documents
+    if (
+      file.mimetype === 'application/pdf' || 
+      file.mimetype === 'application/msword' || 
+      file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF and Word documents are allowed'));
+    }
+  }
+});
+
+// Define the middleware to handle file uploads
+const uploadMiddleware = upload.single('file');
+
+
 
 
 
