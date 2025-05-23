@@ -348,14 +348,18 @@ async function sendAutomatedEmails() {
   }
 
   try {
-    // Create FormData for the email sending
-    const formData = new FormData();
-    formData.append('subject', automationState.config.subject);
-    formData.append('content', automationState.config.content);
+    // Create a mock request object that matches what sendEmailsToAll expects
+    const mockReq = {
+      body: {
+        subject: automationState.config.subject,
+        content: automationState.config.content
+      },
+      file: null
+    };
 
-    // Handle resume file
+    // Handle resume file for the mock request
     if (automationState.config.useDefaultResume) {
-      // For default resumes, we need to fetch them
+      // For default resumes, we need to fetch them from the public directory
       const RESUME_PATHS = {
         'frontend': '/naveen_ak_frnt_developer.pdf',
         'backend': '/wit_icon.pdf',
@@ -367,9 +371,13 @@ async function sendAutomatedEmails() {
         try {
           const fullPath = path.join(__dirname, 'public', resumePath);
           if (fs.existsSync(fullPath)) {
-            const resumeBuffer = fs.readFileSync(fullPath);
-            const resumeBlob = new Blob([resumeBuffer], { type: 'application/pdf' });
-            formData.append('resume', resumeBlob, path.basename(resumePath));
+            // Create a mock file object that matches multer's structure
+            mockReq.file = {
+              path: fullPath,
+              filename: path.basename(resumePath),
+              originalname: path.basename(resumePath),
+              mimetype: 'application/pdf'
+            };
           }
         } catch (error) {
           console.error('Error reading default resume:', error);
@@ -377,24 +385,15 @@ async function sendAutomatedEmails() {
       }
     } else if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
       // Use uploaded resume file
-      const resumeBuffer = fs.readFileSync(automationState.resumeFilePath);
-      const resumeBlob = new Blob([resumeBuffer], { type: 'application/pdf' });
-      formData.append('resume', resumeBlob, path.basename(automationState.resumeFilePath));
+      mockReq.file = {
+        path: automationState.resumeFilePath,
+        filename: path.basename(automationState.resumeFilePath),
+        originalname: path.basename(automationState.resumeFilePath),
+        mimetype: 'application/pdf'
+      };
     }
 
-    // Call the existing email sending function
-    // We need to simulate a request object for the existing function
-    const mockReq = {
-      body: {
-        subject: automationState.config.subject,
-        content: automationState.config.content
-      },
-      file: automationState.resumeFilePath ? {
-        path: automationState.resumeFilePath,
-        filename: path.basename(automationState.resumeFilePath)
-      } : null
-    };
-
+    // Create a mock response object
     const mockRes = {
       status: (code) => ({
         json: (data) => {
@@ -536,10 +535,9 @@ apiRouter.post('/automation/stop', (req, res) => {
       return res.status(400).json({ error: 'Automation is not running' });
     }
 
-    // Stop and destroy the cron job
+    // Stop the cron job (destroy() method doesn't exist, just use stop())
     if (automationState.cronJob) {
       automationState.cronJob.stop();
-      automationState.cronJob.destroy();
       automationState.cronJob = null;
     }
 
@@ -712,7 +710,6 @@ process.on('SIGINT', () => {
   if (automationState.isRunning && automationState.cronJob) {
     console.log('🛑 Stopping email automation...');
     automationState.cronJob.stop();
-    automationState.cronJob.destroy();
     
     // Clean up uploaded resume file if exists
     if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
@@ -735,7 +732,6 @@ process.on('SIGTERM', () => {
   if (automationState.isRunning && automationState.cronJob) {
     console.log('🛑 Stopping email automation...');
     automationState.cronJob.stop();
-    automationState.cronJob.destroy();
     
     // Clean up uploaded resume file if exists
     if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
