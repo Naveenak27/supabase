@@ -338,8 +338,7 @@ const upload = multer({
   }
 });
 
-// Replace your sendAutomatedEmails function with this improved version:
-
+// Function to send automated emails
 async function sendAutomatedEmails() {
   console.log('🤖 Automation: Starting scheduled email send...');
   
@@ -469,7 +468,38 @@ async function sendAutomatedEmails() {
   }
 }
 
-// Also add a debug endpoint to check file paths
+// Function to schedule the next email run
+function scheduleNextRun() {
+  if (automationState.isRunning) {
+    const nextRun = new Date();
+    nextRun.setHours(nextRun.getHours() + 4); // Add 4 hours
+    automationState.nextSendTime = nextRun;
+    
+    console.log(`⏰ Automation: Next email scheduled for ${nextRun.toLocaleString()}`);
+  }
+}
+
+// Define API router
+const apiRouter = express.Router();
+
+// Existing email query routes
+apiRouter.get('/emails/paginated', getPaginatedEmails);
+apiRouter.put('/api/emails/:id/toggle-status', toggleEmailStatus);
+apiRouter.get('/emails/test', getTestEmails);
+apiRouter.get('/emails', getAllEmails);
+apiRouter.post('/upload', upload.single('file'), uploadFile);
+apiRouter.post('/send-emails', sendEmailsToAll);
+apiRouter.post('/send-email', sendSingleEmail);
+apiRouter.get('/logs', getEmailLogs);
+apiRouter.delete('/logs/:id', deleteEmailLog);
+apiRouter.delete('/logs', deleteAllEmailLogs);
+apiRouter.post('/logs/batch-delete', batchDeleteLogs);
+apiRouter.delete('/emails-duplicates', deleteDuplicateEmails);
+apiRouter.delete('/emails/:id', deleteEmail);
+apiRouter.post('/emails/:emailId/mark-replied', markEmailAsReplied);
+apiRouter.delete('/emails-batch', deleteAllEmails);
+
+// DEBUG ENDPOINT - Add this debug endpoint here, after apiRouter is defined
 apiRouter.get('/debug/files', (req, res) => {
   const debugInfo = {
     currentDirectory: __dirname,
@@ -513,38 +543,7 @@ apiRouter.get('/debug/files', (req, res) => {
   res.json(debugInfo);
 });
 
-// Function to schedule the next email run
-function scheduleNextRun() {
-  if (automationState.isRunning) {
-    const nextRun = new Date();
-    nextRun.setHours(nextRun.getHours() + 4); // Add 4 hours
-    automationState.nextSendTime = nextRun;
-    
-    console.log(`⏰ Automation: Next email scheduled for ${nextRun.toLocaleString()}`);
-  }
-}
-
-// Define API router
-const apiRouter = express.Router();
-
-// Existing email query routes
-apiRouter.get('/emails/paginated', getPaginatedEmails);
-apiRouter.put('/api/emails/:id/toggle-status', toggleEmailStatus);
-apiRouter.get('/emails/test', getTestEmails);
-apiRouter.get('/emails', getAllEmails);
-apiRouter.post('/upload', upload.single('file'), uploadFile);
-apiRouter.post('/send-emails', sendEmailsToAll);
-apiRouter.post('/send-email', sendSingleEmail);
-apiRouter.get('/logs', getEmailLogs);
-apiRouter.delete('/logs/:id', deleteEmailLog);
-apiRouter.delete('/logs', deleteAllEmailLogs);
-apiRouter.post('/logs/batch-delete', batchDeleteLogs);
-apiRouter.delete('/emails-duplicates', deleteDuplicateEmails);
-apiRouter.delete('/emails/:id', deleteEmail);
-apiRouter.post('/emails/:emailId/mark-replied', markEmailAsReplied);
-apiRouter.delete('/emails-batch', deleteAllEmails);
-
-// NEW AUTOMATION ROUTES
+// AUTOMATION ROUTES
 
 // Get automation status
 apiRouter.get('/automation/status', (req, res) => {
@@ -797,6 +796,39 @@ app.get('/setup-guide', setupGuide);
 // Add an OPTIONS handler for preflight requests
 app.options('*', cors());
 
+// Keep-alive ping for Render (prevents auto-sleep)
+const RENDER_SERVICE_URL = process.env.RENDER_SERVICE_URL || `http://localhost:${PORT}`;
+
+function keepAlive() {
+  // Only run keep-alive in production (Render environment)
+  if (process.env.NODE_ENV === 'production' && process.env.RENDER_SERVICE_URL) {
+    setInterval(async () => {
+      try {
+        // Use node's built-in fetch if available (Node 18+), or require http module
+        const https = require('https');
+        const http = require('http');
+        
+        const url = new URL(`${RENDER_SERVICE_URL}/health`);
+        const client = url.protocol === 'https:' ? https : http;
+        
+        const req = client.request(url, (res) => {
+          console.log(`🏥 Keep-alive ping: ${res.statusCode}`);
+        });
+        
+        req.on('error', (error) => {
+          console.error('❌ Keep-alive ping failed:', error.message);
+        });
+        
+        req.end();
+      } catch (error) {
+        console.error('❌ Keep-alive ping failed:', error.message);
+      }
+    }, 10 * 60 * 1000); // Ping every 10 minutes
+    
+    console.log('🔄 Keep-alive service started (pings every 10 minutes)');
+  }
+}
+
 // Graceful shutdown handling
 process.on('SIGINT', () => {
   console.log('🛑 Received SIGINT. Gracefully shutting down...');
@@ -846,6 +878,10 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📧 Email logs available at: http://localhost:${PORT}/api/logs`);
   console.log(`🤖 Automation status available at: http://localhost:${PORT}/api/automation/status`);
+  console.log(`🔍 Debug files available at: http://localhost:${PORT}/api/debug/files`);
+  
+  // Start keep-alive service
+  keepAlive();
   
   // Log automation state on startup
   if (automationState.isRunning) {
