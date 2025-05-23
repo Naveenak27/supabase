@@ -348,16 +348,9 @@ async function sendAutomatedEmails() {
   }
 
   try {
-    // Create a mock request object that matches what sendEmailsToAll expects
-    const mockReq = {
-      body: {
-        subject: automationState.config.subject,
-        content: automationState.config.content
-      },
-      file: null
-    };
-
-    // Handle resume file for the mock request
+    // Create a proper mock file object that matches multer's complete structure
+    let mockFile = null;
+    
     if (automationState.config.useDefaultResume) {
       // For default resumes, we need to fetch them from the public directory
       const RESUME_PATHS = {
@@ -371,12 +364,19 @@ async function sendAutomatedEmails() {
         try {
           const fullPath = path.join(__dirname, 'public', resumePath);
           if (fs.existsSync(fullPath)) {
-            // Create a mock file object that matches multer's structure
-            mockReq.file = {
-              path: fullPath,
-              filename: path.basename(resumePath),
+            const stats = fs.statSync(fullPath);
+            // Create a complete mock file object that matches multer's structure
+            mockFile = {
+              fieldname: 'resume',
               originalname: path.basename(resumePath),
-              mimetype: 'application/pdf'
+              encoding: '7bit',
+              mimetype: 'application/pdf',
+              destination: path.dirname(fullPath),
+              filename: path.basename(resumePath),
+              path: fullPath,
+              size: stats.size,
+              stream: null,
+              buffer: null
             };
           }
         } catch (error) {
@@ -385,13 +385,37 @@ async function sendAutomatedEmails() {
       }
     } else if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
       // Use uploaded resume file
-      mockReq.file = {
-        path: automationState.resumeFilePath,
-        filename: path.basename(automationState.resumeFilePath),
-        originalname: path.basename(automationState.resumeFilePath),
-        mimetype: 'application/pdf'
-      };
+      try {
+        const stats = fs.statSync(automationState.resumeFilePath);
+        mockFile = {
+          fieldname: 'resume',
+          originalname: path.basename(automationState.resumeFilePath),
+          encoding: '7bit',
+          mimetype: 'application/pdf',
+          destination: path.dirname(automationState.resumeFilePath),
+          filename: path.basename(automationState.resumeFilePath),
+          path: automationState.resumeFilePath,
+          size: stats.size,
+          stream: null,
+          buffer: null
+        };
+      } catch (error) {
+        console.error('Error reading uploaded resume:', error);
+      }
     }
+
+    // Create a mock request object that matches what sendEmailsToAll expects
+    const mockReq = {
+      body: {
+        subject: automationState.config.subject,
+        content: automationState.config.content
+      },
+      file: mockFile,
+      headers: {
+        // Only set multipart content-type if we have a file
+        'content-type': mockFile ? 'multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW' : 'application/json'
+      }
+    };
 
     // Create a mock response object
     const mockRes = {
@@ -399,7 +423,8 @@ async function sendAutomatedEmails() {
         json: (data) => {
           if (code === 200) {
             console.log('✅ Automation: Emails sent successfully');
-            automationState.totalSent += data.successCount || 0;
+            console.log(`📊 Sent: ${data.sentCount}, Failed: ${data.failedCount}, Skipped: ${data.skippedCount}`);
+            automationState.totalSent += data.sentCount || 0;
             
             // Schedule next run
             scheduleNextRun();
@@ -535,7 +560,7 @@ apiRouter.post('/automation/stop', (req, res) => {
       return res.status(400).json({ error: 'Automation is not running' });
     }
 
-    // Stop the cron job (destroy() method doesn't exist, just use stop())
+    // Stop the cron job
     if (automationState.cronJob) {
       automationState.cronJob.stop();
       automationState.cronJob = null;
@@ -545,6 +570,7 @@ apiRouter.post('/automation/stop', (req, res) => {
     if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
       try {
         fs.unlinkSync(automationState.resumeFilePath);
+        console.log('🗑️ Cleaned up uploaded resume file');
       } catch (error) {
         console.error('Error deleting resume file:', error);
       }
