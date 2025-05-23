@@ -338,7 +338,8 @@ const upload = multer({
   }
 });
 
-// Function to send automated emails
+// Replace your sendAutomatedEmails function with this improved version:
+
 async function sendAutomatedEmails() {
   console.log('🤖 Automation: Starting scheduled email send...');
   
@@ -348,39 +349,55 @@ async function sendAutomatedEmails() {
   }
 
   try {
-    // Create a proper mock file object that matches multer's complete structure
     let mockFile = null;
     
     if (automationState.config.useDefaultResume) {
-      // For default resumes, we need to fetch them from the public directory
+      // For default resumes, construct the correct path
       const RESUME_PATHS = {
-        'frontend': '/naveen_ak_frnt_developer.pdf',
-        'backend': '/wit_icon.pdf',
-        'fullstack': '/naveen_ak_fullstack.pdf'
+        'frontend': 'naveen_ak_frnt_developer.pdf',
+        'backend': 'wit_icon.pdf',
+        'fullstack': 'naveen_ak_fullstack.pdf'
       };
       
-      const resumePath = RESUME_PATHS[automationState.config.selectedResumeKey];
-      if (resumePath) {
-        try {
-          const fullPath = path.join(__dirname, 'public', resumePath);
-          if (fs.existsSync(fullPath)) {
-            const stats = fs.statSync(fullPath);
-            // Create a complete mock file object that matches multer's structure
+      const resumeFileName = RESUME_PATHS[automationState.config.selectedResumeKey];
+      if (resumeFileName) {
+        // Try multiple possible paths
+        const possiblePaths = [
+          path.join(__dirname, 'public', resumeFileName),
+          path.join(__dirname, 'uploads', resumeFileName),
+          path.join(process.cwd(), 'public', resumeFileName),
+          path.join(process.cwd(), resumeFileName)
+        ];
+        
+        let validPath = null;
+        for (const testPath of possiblePaths) {
+          if (fs.existsSync(testPath)) {
+            validPath = testPath;
+            console.log(`✅ Found resume at: ${validPath}`);
+            break;
+          }
+        }
+        
+        if (validPath) {
+          try {
+            const stats = fs.statSync(validPath);
             mockFile = {
               fieldname: 'resume',
-              originalname: path.basename(resumePath),
+              originalname: resumeFileName,
               encoding: '7bit',
               mimetype: 'application/pdf',
-              destination: path.dirname(fullPath),
-              filename: path.basename(resumePath),
-              path: fullPath,
-              size: stats.size,
-              stream: null,
-              buffer: null
+              destination: path.dirname(validPath),
+              filename: resumeFileName,
+              path: validPath,
+              size: stats.size
             };
+            console.log(`📎 Resume file prepared: ${resumeFileName} (${stats.size} bytes)`);
+          } catch (error) {
+            console.error('❌ Error reading default resume stats:', error);
           }
-        } catch (error) {
-          console.error('Error reading default resume:', error);
+        } else {
+          console.error(`❌ Default resume not found: ${resumeFileName}`);
+          console.log('Searched paths:', possiblePaths);
         }
       }
     } else if (automationState.resumeFilePath && fs.existsSync(automationState.resumeFilePath)) {
@@ -395,13 +412,22 @@ async function sendAutomatedEmails() {
           destination: path.dirname(automationState.resumeFilePath),
           filename: path.basename(automationState.resumeFilePath),
           path: automationState.resumeFilePath,
-          size: stats.size,
-          stream: null,
-          buffer: null
+          size: stats.size
         };
+        console.log(`📎 Uploaded resume prepared: ${mockFile.originalname} (${stats.size} bytes)`);
       } catch (error) {
-        console.error('Error reading uploaded resume:', error);
+        console.error('❌ Error reading uploaded resume:', error);
       }
+    }
+
+    // Debug: Log what we're sending
+    console.log('🔍 Debug - Email configuration:');
+    console.log(`   Subject: ${automationState.config.subject}`);
+    console.log(`   Content length: ${automationState.config.content.length} chars`);
+    console.log(`   Has resume: ${mockFile ? 'YES' : 'NO'}`);
+    if (mockFile) {
+      console.log(`   Resume path: ${mockFile.path}`);
+      console.log(`   Resume exists: ${fs.existsSync(mockFile.path)}`);
     }
 
     // Create a mock request object that matches what sendEmailsToAll expects
@@ -412,7 +438,6 @@ async function sendAutomatedEmails() {
       },
       file: mockFile,
       headers: {
-        // Only set multipart content-type if we have a file
         'content-type': mockFile ? 'multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW' : 'application/json'
       }
     };
@@ -443,6 +468,50 @@ async function sendAutomatedEmails() {
     console.error('❌ Automation: Error sending emails:', error);
   }
 }
+
+// Also add a debug endpoint to check file paths
+apiRouter.get('/debug/files', (req, res) => {
+  const debugInfo = {
+    currentDirectory: __dirname,
+    processDirectory: process.cwd(),
+    automationState: {
+      isRunning: automationState.isRunning,
+      hasConfig: !!automationState.config,
+      resumeFilePath: automationState.resumeFilePath,
+      config: automationState.config ? {
+        useDefaultResume: automationState.config.useDefaultResume,
+        selectedResumeKey: automationState.config.selectedResumeKey
+      } : null
+    },
+    fileChecks: {}
+  };
+  
+  // Check for default resume files
+  const RESUME_PATHS = {
+    'frontend': 'naveen_ak_frnt_developer.pdf',
+    'backend': 'wit_icon.pdf',
+    'fullstack': 'naveen_ak_fullstack.pdf'
+  };
+  
+  Object.entries(RESUME_PATHS).forEach(([key, filename]) => {
+    const possiblePaths = [
+      path.join(__dirname, 'public', filename),
+      path.join(__dirname, 'uploads', filename),
+      path.join(process.cwd(), 'public', filename),
+      path.join(process.cwd(), filename)
+    ];
+    
+    debugInfo.fileChecks[key] = {
+      filename,
+      paths: possiblePaths.map(p => ({
+        path: p,
+        exists: fs.existsSync(p)
+      }))
+    };
+  });
+  
+  res.json(debugInfo);
+});
 
 // Function to schedule the next email run
 function scheduleNextRun() {
