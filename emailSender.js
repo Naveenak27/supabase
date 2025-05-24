@@ -156,30 +156,96 @@ const checkIfEmailAlreadySent = async (email, subject) => {
   }
 };
 
+
+
+
+
+
+
+
+
 // Get email logs from database
+// const getEmailLogs = async (req, res) => {
+//   try {
+//     // Try to get logs from database first
+//     const { data, error } = await supabase
+//       .from('email_logs')
+//       .select('*')
+//       .order('sent_at', { ascending: false })
+//       .limit(3000);
+    
+//     if (error) {
+//       console.error('Error fetching email logs:', error);
+//       // If database fails, return in-memory logs if available
+//       const memoryLogs = global.emailLogs || [];
+      
+//       // Extract successful and skipped emails from memory logs
+//       const successfulEmails = memoryLogs
+//         .filter(log => log.status === 'success')
+//         .map(log => log.email);
+      
+//       const skippedEmails = memoryLogs
+//         .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
+//         .map(log => log.email);
+      
+//       return res.status(200).json({
+//         success: true,
+//         data: memoryLogs,
+//         successfulEmails,
+//         skippedEmails,
+//         source: 'memory'
+//       });
+//     }
+    
+//     // Extract successful and skipped emails from database logs
+//     const successfulEmails = data
+//       .filter(log => log.status === 'success')
+//       .map(log => log.email);
+    
+//     const skippedEmails = data
+//       .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
+//       .map(log => log.email);
+    
+//     return res.status(200).json({
+//       success: true,
+//       data: data,
+//       successfulEmails,
+//       skippedEmails,
+//       source: 'database'
+//     });
+//   } catch (error) {
+//     console.error('Server error fetching logs:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+
+
 const getEmailLogs = async (req, res) => {
   try {
     // Try to get logs from database first
     const { data, error } = await supabase
       .from('email_logs')
       .select('*')
-      .order('sent_at', { ascending: false })
-      .limit(3000);
-    
+      .order('sent_at', { ascending: false });
+
     if (error) {
       console.error('Error fetching email logs:', error);
       // If database fails, return in-memory logs if available
       const memoryLogs = global.emailLogs || [];
-      
+
       // Extract successful and skipped emails from memory logs
       const successfulEmails = memoryLogs
         .filter(log => log.status === 'success')
         .map(log => log.email);
-      
+
       const skippedEmails = memoryLogs
         .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
         .map(log => log.email);
-      
+
       return res.status(200).json({
         success: true,
         data: memoryLogs,
@@ -188,16 +254,16 @@ const getEmailLogs = async (req, res) => {
         source: 'memory'
       });
     }
-    
+
     // Extract successful and skipped emails from database logs
     const successfulEmails = data
       .filter(log => log.status === 'success')
       .map(log => log.email);
-    
+
     const skippedEmails = data
       .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
       .map(log => log.email);
-    
+
     return res.status(200).json({
       success: true,
       data: data,
@@ -213,6 +279,26 @@ const getEmailLogs = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Controller for sending emails to all recipients in DB
 // const sendEmailsToAll = async (req, res) => {
 //   try {
