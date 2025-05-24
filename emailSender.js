@@ -164,7 +164,7 @@ const getEmailLogs = async (req, res) => {
       .from('email_logs')
       .select('*')
       .order('sent_at', { ascending: false })
-      .limit(100);
+      .limit(3000);
     
     if (error) {
       console.error('Error fetching email logs:', error);
