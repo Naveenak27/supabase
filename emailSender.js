@@ -322,6 +322,7 @@ const sendEmailsToAll = async (req, res) => {
         await logEmailResult(email, emailSubject, 'failed', error.message);
       }
       
+      
       // Add a delay after each email (except the last one)
       if (i < emails.length - 1) {
         console.log(`Waiting 35 seconds before sending the next email...`);
