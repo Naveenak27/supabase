@@ -3,7 +3,10 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
+
+
 
 
 // Import controllers
@@ -42,6 +45,8 @@ app.use(cors({
 // For parsing JSON and URL-encoded data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+
 
 // Configure multer for CSV/ODS file uploads
 const storage = multer.diskStorage({
@@ -239,6 +244,451 @@ app.get('/status', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+
+
+// GET - Fetch all email templates
+app.get('/api/email-templates', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('email_templates')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching templates:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch email templates',
+        details: error.message 
+      });
+    }
+
+    // Transform data to match frontend expectations
+    const templates = data.map(template => ({
+      id: template.id,
+      name: template.name,
+      subject: template.subject,
+      content: template.content,
+      created_at: template.created_at,
+      updated_at: template.updated_at
+    }));
+
+    res.status(200).json({
+      success: true,
+      templates: templates,
+      count: templates.length
+    });
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// POST - Create a new email template
+app.post('/api/email-templates', async (req, res) => {
+  try {
+    const { name, subject, content } = req.body;
+
+    // Validation
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    // Additional validation
+    if (name.trim().length < 3) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Template name must be at least 3 characters long'
+      });
+    }
+
+    if (subject.trim().length < 5) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Subject must be at least 5 characters long'
+      });
+    }
+
+    if (content.trim().length < 50) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Content must be at least 50 characters long'
+      });
+    }
+
+    // Check if template name already exists
+    const { data: existingTemplate } = await supabase
+      .from('email_templates')
+      .select('name')
+      .eq('name', name.trim())
+      .single();
+
+    if (existingTemplate) {
+      return res.status(409).json({
+        error: 'Template name already exists',
+        message: 'Please choose a different template name'
+      });
+    }
+
+    // Insert new template
+    const { data, error } = await supabase
+      .from('email_templates')
+      .insert([
+        {
+          name: name.trim(),
+          subject: subject.trim(),
+          content: content.trim()
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating template:', error);
+      return res.status(500).json({
+        error: 'Failed to create email template',
+        details: error.message
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Email template created successfully',
+      template: {
+        id: data.id,
+        name: data.name,
+        subject: data.subject,
+        content: data.content,
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// GET - Fetch a single email template by ID
+app.get('/api/email-templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({
+        error: 'Template not found',
+        message: 'The specified template does not exist'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      template: {
+        id: data.id,
+        name: data.name,
+        subject: data.subject,
+        content: data.content,
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// PUT - Update an existing email template
+app.put('/api/email-templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, subject, content } = req.body;
+
+    // Validation
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    // Additional validation
+    if (name.trim().length < 3) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Template name must be at least 3 characters long'
+      });
+    }
+
+    if (subject.trim().length < 5) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Subject must be at least 5 characters long'
+      });
+    }
+
+    if (content.trim().length < 50) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'Content must be at least 50 characters long'
+      });
+    }
+
+    // Check if template exists
+    const { data: existingTemplate, error: fetchError } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existingTemplate) {
+      return res.status(404).json({
+        error: 'Template not found',
+        message: 'The specified template does not exist'
+      });
+    }
+
+    // Check if new name conflicts with another template
+    if (name.trim() !== existingTemplate.name) {
+      const { data: nameConflict } = await supabase
+        .from('email_templates')
+        .select('name')
+        .eq('name', name.trim())
+        .neq('id', id)
+        .single();
+
+      if (nameConflict) {
+        return res.status(409).json({
+          error: 'Template name already exists',
+          message: 'Please choose a different template name'
+        });
+      }
+    }
+
+    // Update template
+    const { data, error } = await supabase
+      .from('email_templates')
+      .update({
+        name: name.trim(),
+        subject: subject.trim(),
+        content: content.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating template:', error);
+      return res.status(500).json({
+        error: 'Failed to update email template',
+        details: error.message
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Email template updated successfully',
+      template: {
+        id: data.id,
+        name: data.name,
+        subject: data.subject,
+        content: data.content,
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// DELETE - Delete an email template
+app.delete('/api/email-templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if template exists
+    const { data: existingTemplate, error: fetchError } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existingTemplate) {
+      return res.status(404).json({
+        error: 'Template not found',
+        message: 'The specified template does not exist'
+      });
+    }
+
+    // Delete template
+    const { error } = await supabase
+      .from('email_templates')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting template:', error);
+      return res.status(500).json({
+        error: 'Failed to delete email template',
+        details: error.message
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Email template deleted successfully',
+      deletedTemplate: {
+        id: existingTemplate.id,
+        name: existingTemplate.name,
+        subject: existingTemplate.subject,
+        content: existingTemplate.content
+      }
+    });
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// ========================================
+// EMAIL SENDING ROUTE
+// ========================================
+
+// POST - Send emails with resume
+app.post('/api/send-emails', upload.single('resume'), async (req, res) => {
+  try {
+    const { subject, content } = req.body;
+    const resumeFile = req.file;
+
+    // Validation
+    if (!resumeFile) {
+      return res.status(400).json({ 
+        error: 'Resume file is required',
+        message: 'Please upload a resume file'
+      });
+    }
+
+    if (!subject || !content) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        message: 'Subject and content are required' 
+      });
+    }
+
+    // Validate file type
+    const allowedTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    if (!allowedTypes.includes(resumeFile.mimetype)) {
+      return res.status(400).json({
+        error: 'Invalid file type',
+        message: 'Only PDF and DOCX files are allowed'
+      });
+    }
+
+    // TODO: Add your email sending logic here
+    // This is where you would integrate with your email service
+    // For example, using nodemailer, SendGrid, etc.
+    
+    console.log('Email Details:');
+    console.log('Subject:', subject);
+    console.log('Content:', content);
+    console.log('Resume File:', resumeFile.originalname);
+    console.log('File Size:', resumeFile.size);
+    console.log('File Type:', resumeFile.mimetype);
+
+    // Simulate email sending delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Simulate successful email sending
+    // Replace this with your actual email sending implementation
+    const emailResults = {
+      totalEmails: 10, // Replace with actual count
+      successfulEmails: 8, // Replace with actual count
+      failedEmails: 2, // Replace with actual count
+      errors: [] // Replace with actual errors if any
+    };
+
+    // Log email sending activity (optional)
+    try {
+      await supabase
+        .from('email_logs')
+        .insert([
+          {
+            subject: subject,
+            content: content,
+            resume_filename: resumeFile.originalname,
+            total_sent: emailResults.successfulEmails,
+            total_failed: emailResults.failedEmails,
+            sent_at: new Date().toISOString()
+          }
+        ]);
+    } catch (logError) {
+      console.error('Error logging email activity:', logError);
+      // Don't fail the request if logging fails
+    }
+
+    res.status(200).json({ 
+      success: true,
+      message: 'Emails sent successfully',
+      results: {
+        totalEmails: emailResults.totalEmails,
+        successfulEmails: emailResults.successfulEmails,
+        failedEmails: emailResults.failedEmails,
+        errors: emailResults.errors
+      }
+    });
+
+  } catch (error) {
+    console.error('Error sending emails:', error);
+    res.status(500).json({ 
+      error: 'Failed to send emails',
+      details: error.message
+    });
+  }
+});
+
+
+
+
+
+
+
+
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
