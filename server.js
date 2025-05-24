@@ -232,6 +232,14 @@ app.get('/setup-guide', setupGuide);
 // Add an OPTIONS handler for preflight requests
 app.options('*', cors());
 
+app.get('/status', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Email logs available at: http://localhost:${PORT}/api/logs`);
