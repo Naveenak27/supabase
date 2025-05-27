@@ -62,7 +62,6 @@ const storage = multer.diskStorage({
   }
 });
 
-const allowedExtensions = ['.csv', '.ods', '.pdf', '.docx'];
 
 // const upload = multer({
 //   storage,
@@ -77,17 +76,18 @@ const allowedExtensions = ['.csv', '.ods', '.pdf', '.docx'];
 // });
 
 
+const allowedExtensions = ['.csv', '.ods', '.pdf', '.docx'];
 const upload = multer({
-  storage: multer.memoryStorage(), // Use memory storage for file buffers
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const allowedExtensions = ['.pdf', '.docx', '.csv', '.ods'];
     if (allowedExtensions.includes(ext)) {
       cb(null, true);
     } else {
       cb(new Error(`Allowed file types: ${allowedExtensions.join(', ')}`));
     }
-  }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 app.use((err, req, res, next) => {
