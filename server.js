@@ -62,18 +62,30 @@ const storage = multer.diskStorage({
   }
 });
 
+const allowedExtensions = ['.csv', '.ods', '.pdf', '.docx'];
+
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (ext === '.csv' || ext === '.ods') {
+    if (allowedExtensions.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only CSV and ODS files are allowed'));
+      cb(new Error(`Allowed file types: ${allowedExtensions.join(', ')}`));
     }
   }
 });
 
+// Error handling middleware (place after routes)
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err.message.includes('file')) {
+    return res.status(400).json({ 
+      error: 'File upload error',
+      message: err.message 
+    });
+  }
+  next(err);
+});
 // Define API router
 const apiRouter = express.Router();
 
@@ -729,160 +741,6 @@ app.get('/api/resumes/:id', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-// Download resume file by ID
-app.get('/api/resumes/:id/download', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: resume, error } = await supabase
-      .from('resumes')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error || !resume) {
-      return res.status(404).json({ error: 'Resume not found' });
-    }
-
-    // Convert base64 back to buffer
-    const fileBuffer = Buffer.from(resume.file_data, 'base64');
-    
-    res.set({
-      'Content-Type': resume.file_type,
-      'Content-Disposition': `attachment; filename="${resume.file_name}"`,
-      'Content-Length': fileBuffer.length
-    });
-
-    res.send(fileBuffer);
-  } catch (error) {
-    console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Upload new resume
-app.post('/api/resumes', upload.single('resume'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    const { name, description } = req.body;
-    
-    if (!name) {
-      return res.status(400).json({ error: 'Resume name is required' });
-    }
-
-    // Convert file buffer to base64 for storage
-    const fileBase64 = req.file.buffer.toString('base64');
-
-    const resumeData = {
-      name: name.trim(),
-      description: description?.trim() || null,
-      file_name: req.file.originalname,
-      file_type: req.file.mimetype,
-      file_size: req.file.size,
-      file_data: fileBase64,
-      created_at: new Date().toISOString()
-    };
-
-    const { data, error } = await supabase
-      .from('resumes')
-      .insert([resumeData])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error saving resume:', error);
-      return res.status(500).json({ error: 'Failed to save resume' });
-    }
-
-    // Remove file_data from response to keep it lightweight
-    const { file_data, ...responseData } = data;
-
-    res.status(201).json({ 
-      success: true, 
-      message: 'Resume uploaded successfully',
-      data: responseData
-    });
-  } catch (error) {
-    console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Update resume (metadata only)
-app.put('/api/resumes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, description } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Resume name is required' });
-    }
-
-    const updateData = {
-      name: name.trim(),
-      description: description?.trim() || null,
-      updated_at: new Date().toISOString()
-    };
-
-    const { data, error } = await supabase
-      .from('resumes')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating resume:', error);
-      return res.status(500).json({ error: 'Failed to update resume' });
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: 'Resume not found' });
-    }
-
-    // Remove file_data from response
-    const { file_data, ...responseData } = data;
-
-    res.json({ 
-      success: true, 
-      message: 'Resume updated successfully',
-      data: responseData
-    });
-  } catch (error) {
-    console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Delete resume
-app.delete('/api/resumes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { error } = await supabase
-      .from('resumes')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Error deleting resume:', error);
-      return res.status(500).json({ error: 'Failed to delete resume' });
-    }
-
-    res.json({ 
-      success: true, 
-      message: 'Resume deleted successfully'
-    });
-  } catch (error) {
-    console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 
 
 
