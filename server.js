@@ -64,16 +64,41 @@ const storage = multer.diskStorage({
 
 const allowedExtensions = ['.csv', '.ods', '.pdf', '.docx'];
 
+// const upload = multer({
+//   storage,
+//   fileFilter: (req, file, cb) => {
+//     const ext = path.extname(file.originalname).toLowerCase();
+//     if (allowedExtensions.includes(ext)) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error(`Allowed file types: ${allowedExtensions.join(', ')}`));
+//     }
+//   }
+// });
+
+
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(), // Use memory storage for file buffers
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExtensions = ['.pdf', '.docx', '.csv', '.ods'];
     if (allowedExtensions.includes(ext)) {
       cb(null, true);
     } else {
       cb(new Error(`Allowed file types: ${allowedExtensions.join(', ')}`));
     }
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({
+      success: false,
+      error: 'File upload error',
+      message: err.message
+    });
+  }
+  next(err);
 });
 
 // Error handling middleware (place after routes)
@@ -773,22 +798,43 @@ app.get('/api/resumes/:id/download', async (req, res) => {
   }
 });
 
-// Upload new resume
 app.post('/api/resumes', upload.single('resume'), async (req, res) => {
   try {
+    // Check for file validation errors
+    if (req.fileValidationError) {
+      return res.status(400).json({
+        success: false,
+        error: req.fileValidationError
+      });
+    }
+
+    // Check if file exists
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'No file uploaded' 
+      });
     }
 
+    // Validate file buffer exists
+    if (!req.file.buffer) {
+      return res.status(400).json({
+        success: false,
+        error: 'File processing error - invalid file format'
+      });
+    }
+
+    // Validate required fields
     const { name, description } = req.body;
-    
-    if (!name) {
-      return res.status(400).json({ error: 'Resume name is required' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Resume name is required'
+      });
     }
 
-    // Convert file buffer to base64 for storage
+    // Process file data
     const fileBase64 = req.file.buffer.toString('base64');
-
     const resumeData = {
       name: name.trim(),
       description: description?.trim() || null,
@@ -799,6 +845,7 @@ app.post('/api/resumes', upload.single('resume'), async (req, res) => {
       created_at: new Date().toISOString()
     };
 
+    // Insert into database
     const { data, error } = await supabase
       .from('resumes')
       .insert([resumeData])
@@ -806,24 +853,30 @@ app.post('/api/resumes', upload.single('resume'), async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Error saving resume:', error);
-      return res.status(500).json({ error: 'Failed to save resume' });
+      console.error('Database error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save resume to database'
+      });
     }
 
-    // Remove file_data from response to keep it lightweight
+    // Prepare response
     const { file_data, ...responseData } = data;
 
-    res.status(201).json({ 
-      success: true, 
+    return res.status(201).json({
+      success: true,
       message: 'Resume uploaded successfully',
       data: responseData
     });
+
   } catch (error) {
     console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
   }
 });
-
 // Update resume (metadata only)
 app.put('/api/resumes/:id', async (req, res) => {
   try {
