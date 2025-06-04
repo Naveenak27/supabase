@@ -5,7 +5,7 @@ const getPaginatedEmails = async (req, res) => {
   try {
     // Parse query parameters with defaults
     const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
+    const pageSize = parseInt(req.query.pageSize) || 1000;
     const search = req.query.search || '';
     const offset = (page - 1) * pageSize;
     
