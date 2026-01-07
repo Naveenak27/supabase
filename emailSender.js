@@ -1631,24 +1631,27 @@ const fs = require('fs');
 require('dotenv').config();
 
 console.log('Environment loaded:', {
-  hasApiKey: !!process.env.MAILCHIMP_API_KEY,
-  hasSenderEmail: !!process.env.MAILCHIMP_SENDER_EMAIL
+  hasApiKey: !!process.env.SENDGRID_API_KEY,
+  hasSenderEmail: !!process.env.SENDGRID_SENDER_EMAIL
 });
 
-// Initialize Mailchimp Transactional API
-const mailchimp = require('@mailchimp/mailchimp_transactional')(process.env.MAILCHIMP_API_KEY);
+// Initialize SendGrid
+const sgMail = require('@sendgrid/mail');
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// Helper to build Mailchimp attachment from a file path (base64)
+// Helper to build SendGrid attachment from a file path (base64)
 const fileToBase64Attachment = (attachmentPath) => {
   const content = fs.readFileSync(attachmentPath).toString('base64');
-  const mimeType = path.extname(attachmentPath).toLowerCase() === '.pdf' 
+  const extname = path.extname(attachmentPath).toLowerCase();
+  const mimeType = extname === '.pdf' 
     ? 'application/pdf' 
     : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   
   return {
+    content: content,
+    filename: path.basename(attachmentPath),
     type: mimeType,
-    name: path.basename(attachmentPath),
-    content, // base64 string
+    disposition: 'attachment'
   };
 };
 
@@ -1682,30 +1685,25 @@ const resumeUpload = multer({
   }
 }).single('resume');
 
-// Function to send email to a single recipient with optional attachment via Mailchimp
+// Function to send email to a single recipient with optional attachment via SendGrid
 const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
-  const message = {
-    html: html,
+  const msg = {
+    to: recipient,
+    from: {
+      email: process.env.SENDGRID_SENDER_EMAIL,
+      name: process.env.SENDGRID_SENDER_NAME || undefined
+    },
     subject: subject,
-    from_email: process.env.MAILCHIMP_SENDER_EMAIL,
-    from_name: process.env.MAILCHIMP_SENDER_NAME || undefined,
-    to: [
-      {
-        email: recipient,
-        type: 'to'
-      }
-    ]
+    html: html
   };
 
   // Add attachment if provided
   if (attachmentPath && fs.existsSync(attachmentPath)) {
-    message.attachments = [fileToBase64Attachment(attachmentPath)];
+    msg.attachments = [fileToBase64Attachment(attachmentPath)];
   }
 
-  // Send through Mailchimp Transactional Email API
-  // Returns a promise resolving with API response (contains status, _id, etc.)
-  const response = await mailchimp.messages.send({ message });
-  return response;
+  // Send through SendGrid API
+  return await sgMail.send(msg);
 };
 
 // Log email sending result to database
@@ -1927,20 +1925,16 @@ const sendEmailsToAll = async (req, res) => {
       }
       
       try {
-        const response = await sendEmail(email, emailSubject, emailContent, resumePath);
-        
-        // Check Mailchimp response status
-        if (response && response[0] && (response[0].status === 'sent' || response[0].status === 'queued')) {
-          results.success.push(email);
-          console.log(`✅ Email sent successfully to: ${email} (Status: ${response[0].status})`);
-          await logEmailResult(email, emailSubject, 'success');
-        } else {
-          throw new Error(`Unexpected response status: ${response[0]?.status || 'unknown'}`);
-        }
+        await sendEmail(email, emailSubject, emailContent, resumePath);
+        results.success.push(email);
+        console.log(`✅ Email sent successfully to: ${email}`);
+        await logEmailResult(email, emailSubject, 'success');
       } catch (error) {
         console.error(`❌ Failed to send email to ${email}:`, error.message);
-        results.failed.push({ email, error: error.message });
-        await logEmailResult(email, emailSubject, 'failed', error.message);
+        const errorMsg = error.response?.body?.errors ? 
+          JSON.stringify(error.response.body.errors) : error.message;
+        results.failed.push({ email, error: errorMsg });
+        await logEmailResult(email, emailSubject, 'failed', errorMsg);
       }
       
       if (i < emails.length - 1) {
@@ -1952,7 +1946,7 @@ const sendEmailsToAll = async (req, res) => {
     }
 
     await logEmailResult(
-      process.env.MAILCHIMP_SENDER_EMAIL, 
+      process.env.SENDGRID_SENDER_EMAIL, 
       `Campaign Summary: ${emailSubject}`,
       'campaign_summary', 
       JSON.stringify({
@@ -2094,38 +2088,34 @@ const sendSingleEmail = async (req, res) => {
           });
         }
 
-        const response = await sendEmail(recipient, subject, content, resumePath);
+        await sendEmail(recipient, subject, content, resumePath);
+        await logEmailResult(recipient, subject, 'success');
+        console.log(`✅ Email sent successfully to: ${recipient}`);
         
-        // Check Mailchimp response
-        if (response && response[0] && (response[0].status === 'sent' || response[0].status === 'queued')) {
-          await logEmailResult(recipient, subject, 'success');
-          console.log(`✅ Email sent successfully to: ${recipient} (Status: ${response[0].status})`);
-          
-          if (resumePath && fs.existsSync(resumePath)) {
-            try {
-              fs.unlinkSync(resumePath);
-              console.log(`Deleted temporary file: ${resumePath}`);
-            } catch (deleteError) {
-              console.error(`Error deleting file: ${deleteError.message}`);
-            }
+        if (resumePath && fs.existsSync(resumePath)) {
+          try {
+            fs.unlinkSync(resumePath);
+            console.log(`Deleted temporary file: ${resumePath}`);
+          } catch (deleteError) {
+            console.error(`Error deleting file: ${deleteError.message}`);
           }
-          
-          return res.status(200).json({
-            success: true,
-            message: `Email sent successfully to ${recipient}`
-          });
-        } else {
-          throw new Error(`Unexpected response: ${JSON.stringify(response)}`);
         }
+        
+        return res.status(200).json({
+          success: true,
+          message: `Email sent successfully to ${recipient}`
+        });
       } catch (error) {
         console.error(`❌ Failed to send email to ${recipient}:`, error.message);
-        await logEmailResult(recipient, subject, 'failed', error.message);
+        const errorMsg = error.response?.body?.errors ? 
+          JSON.stringify(error.response.body.errors) : error.message;
+        await logEmailResult(recipient, subject, 'failed', errorMsg);
         if (resumePath && fs.existsSync(resumePath)) {
           fs.unlinkSync(resumePath);
         }
         return res.status(500).json({
           success: false,
-          error: `Failed to send email: ${error.message}`
+          error: `Failed to send email: ${errorMsg}`
         });
       }
     } catch (error) {
@@ -2275,4 +2265,3 @@ module.exports = {
   deleteAllEmailLogs,
   batchDeleteLogs
 };
-
