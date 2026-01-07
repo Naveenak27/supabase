@@ -989,6 +989,12 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+console.log('Environment loaded:', {
+  hasApiKey: !!process.env.BREVO_API_KEY,
+  hasSenderEmail: !!process.env.BREVO_SENDER_EMAIL
+});
+
+
 // Brevo SDK
 const Brevo = require('@getbrevo/brevo');
 const brevoApi = new Brevo.TransactionalEmailsApi();
