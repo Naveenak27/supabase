@@ -1618,27 +1618,26 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-// ========== BREVO SDK SETUP (CORRECT METHOD) ==========
-const Brevo = require('@getbrevo/brevo');
+// ========== BREVO SDK CONFIGURATION ==========
+const brevo = require('@getbrevo/brevo');
+const apiInstance = new brevo.TransactionalEmailsApi();
 
-// Configure API client
-let defaultClient = Brevo.ApiClient.instance;
-let apiKey = defaultClient.authentications['api-key'];
-apiKey.apiKey = process.env.BREVO_API_KEY;
+// Set API key directly
+apiInstance.authentications = apiInstance.authentications || {};
+apiInstance.authentications['api-key'] = apiInstance.authentications['api-key'] || {};
+apiInstance.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 
-// Create API instance
-const brevoApi = new Brevo.TransactionalEmailsApi();
-
-console.log('✅ Brevo API Key configured:', process.env.BREVO_API_KEY?.substring(0, 20) + '...');
-console.log('✅ Sender Email:', process.env.BREVO_SENDER_EMAIL);
-// ======================================================
+console.log('✅ Brevo API configured');
+console.log('   API Key:', process.env.BREVO_API_KEY?.substring(0, 20) + '...');
+console.log('   Sender:', process.env.BREVO_SENDER_EMAIL);
+// ============================================
 
 // Helper to build Brevo attachment from a file path (base64)
 const fileToBase64Attachment = (attachmentPath) => {
   const content = fs.readFileSync(attachmentPath).toString('base64');
   return {
     name: path.basename(attachmentPath),
-    content, // base64 string
+    content,
   };
 };
 
@@ -1672,18 +1671,15 @@ const resumeUpload = multer({
   }
 }).single('resume');
 
-// ========== SEND EMAIL FUNCTION (CORRECTED) ==========
+// ========== SEND EMAIL FUNCTION ==========
 const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
-  console.log('=== BREVO DEBUG INFO ===');
-  console.log('API Key present?', !!process.env.BREVO_API_KEY);
-  console.log('API Key starts with:', process.env.BREVO_API_KEY?.substring(0, 15));
-  console.log('Sender Email:', process.env.BREVO_SENDER_EMAIL);
-  console.log('Recipient:', recipient);
-  console.log('=======================');
-
-  // Create SendSmtpEmail object correctly
-  const sendSmtpEmail = new Brevo.SendSmtpEmail();
-
+  console.log('=== SENDING EMAIL ===');
+  console.log('To:', recipient);
+  console.log('Subject:', subject);
+  console.log('API Key present:', !!process.env.BREVO_API_KEY);
+  console.log('Sender:', process.env.BREVO_SENDER_EMAIL);
+  
+  const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
   sendSmtpEmail.htmlContent = html;
   sendSmtpEmail.sender = {
@@ -1694,22 +1690,22 @@ const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
 
   if (attachmentPath && fs.existsSync(attachmentPath)) {
     sendSmtpEmail.attachment = [fileToBase64Attachment(attachmentPath)];
+    console.log('Attachment added:', path.basename(attachmentPath));
   }
 
   try {
-    const response = await brevoApi.sendTransacEmail(sendSmtpEmail);
-    console.log('✅ Brevo response:', response);
+    const response = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log('✅ Email sent successfully to:', recipient);
     return response;
   } catch (error) {
-    console.error('❌ Brevo API Error Details:');
-    console.error('Status:', error.response?.status);
-    console.error('Status Text:', error.response?.statusText);
-    console.error('Response Data:', JSON.stringify(error.response?.data, null, 2));
-    console.error('Full Error:', error.message);
+    console.error('❌ Failed to send email to:', recipient);
+    console.error('Error status:', error.response?.status);
+    console.error('Error data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('Error message:', error.message);
     throw error;
   }
 };
-// =====================================================
+// ========================================
 
 // Log email sending result to database
 const logEmailResult = async (email, subject, status, errorMessage = null) => {
@@ -1787,6 +1783,7 @@ const checkIfEmailAlreadySent = async (email, subject) => {
   }
 };
 
+// Get email logs
 const getEmailLogs = async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1842,6 +1839,7 @@ const getEmailLogs = async (req, res) => {
 // Controller for sending emails to all recipients in DB
 const sendEmailsToAll = async (req, res) => {
   try {
+    // First, process any file upload (resume)
     try {
       await processFileUpload(req, res);
     } catch (uploadError) {
@@ -1863,6 +1861,7 @@ const sendEmailsToAll = async (req, res) => {
 
     const resumePath = req.file ? req.file.path : null;
 
+    // Get all ACTIVE emails
     let emails = [];
     try {
       const { data, error } = await supabase
@@ -1895,6 +1894,11 @@ const sendEmailsToAll = async (req, res) => {
     }
 
     console.log(`Preparing to send emails to ${emails.length} active recipients`);
+    console.log(`Email subject: ${emailSubject}`);
+    console.log(`Email content: ${emailContent.substring(0, 100)}...`);
+    if (resumePath) {
+      console.log(`Attaching resume: ${resumePath}`);
+    }
 
     const results = { 
       success: [], 
@@ -1935,7 +1939,7 @@ const sendEmailsToAll = async (req, res) => {
       if (i < emails.length - 1) {
         const delayMs = getRandomDelay();
         const delayMinutes = (delayMs / 60000).toFixed(1);
-        console.log(`Waiting ${delayMinutes} minutes before next email...`);
+        console.log(`Waiting ${delayMinutes} minutes (${delayMs}ms) before sending the next email...`);
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
@@ -1956,6 +1960,7 @@ const sendEmailsToAll = async (req, res) => {
     if (resumePath && fs.existsSync(resumePath)) {
       try {
         fs.unlinkSync(resumePath);
+        console.log(`Deleted temporary file: ${resumePath}`);
       } catch (deleteError) {
         console.error(`Error deleting file: ${deleteError.message}`);
       }
@@ -1999,7 +2004,7 @@ const storage = multer.diskStorage({
 const upload = multer({ 
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: 10 * 1024 * 1024, // 10MB
   },
   fileFilter: (req, file, cb) => {
     if (
@@ -2016,6 +2021,7 @@ const upload = multer({
 
 const uploadMiddleware = upload.single('file');
 
+// Controller for sending an email to a single recipient
 const sendSingleEmail = async (req, res) => {
   uploadMiddleware(req, res, async (err) => {
     if (err) {
@@ -2030,9 +2036,15 @@ const sendSingleEmail = async (req, res) => {
       let resumePath = null;
       if (req.file) {
         resumePath = req.file.path;
+        console.log(`File uploaded successfully to: ${resumePath}`);
       }
 
       const { subject, content, recipients: recipientsInput } = req.body;
+      console.log('Received form data:', {
+        subject,
+        content,
+        recipientsInput
+      });
 
       let recipients;
       if (typeof recipientsInput === 'string') {
@@ -2056,10 +2068,14 @@ const sendSingleEmail = async (req, res) => {
       }
 
       const recipient = recipients[0];
+      console.log(`Preparing to send email to: ${recipient}`);
+      console.log(`Email subject: ${subject}`);
+      console.log(`Email content: ${content.substring(0, 100)}...`);
 
       try {
         const alreadySent = await checkIfEmailAlreadySent(recipient, subject);
         if (alreadySent) {
+          console.log(`⏭️ Skipping email to ${recipient}: already sent successfully`);
           if (resumePath && fs.existsSync(resumePath)) {
             fs.unlinkSync(resumePath);
           }
@@ -2073,9 +2089,15 @@ const sendSingleEmail = async (req, res) => {
 
         await sendEmail(recipient, subject, content, resumePath);
         await logEmailResult(recipient, subject, 'success');
+        console.log(`✅ Email sent successfully to: ${recipient}`);
         
         if (resumePath && fs.existsSync(resumePath)) {
-          fs.unlinkSync(resumePath);
+          try {
+            fs.unlinkSync(resumePath);
+            console.log(`Deleted temporary file: ${resumePath}`);
+          } catch (deleteError) {
+            console.error(`Error deleting file: ${deleteError.message}`);
+          }
         }
         
         return res.status(200).json({
@@ -2106,6 +2128,7 @@ const sendSingleEmail = async (req, res) => {
   });
 };
 
+// Delete a single email log
 const deleteEmailLog = async (req, res) => {
   try {
     const { id } = req.params;
@@ -2145,13 +2168,17 @@ const deleteEmailLog = async (req, res) => {
   }
 };
 
+// Delete all email logs
 const deleteAllEmailLogs = async (req, res) => {
   try {
+    console.log('Starting deletion of all email logs...');
     const { data, error } = await supabase.rpc('truncate_email_logs');
     
     if (error) {
+      console.error('Error deleting all email logs:', error);
       const { error: deleteError } = await supabase.from('email_logs').delete();
       if (deleteError) {
+        console.error('Fallback deletion also failed:', deleteError);
         return res.status(500).json({
           success: false,
           error: `Could not delete logs: ${deleteError.message}`
@@ -2163,11 +2190,13 @@ const deleteAllEmailLogs = async (req, res) => {
       global.emailLogs = [];
     }
     
+    console.log('Successfully deleted all email logs');
     return res.status(200).json({
       success: true,
       message: 'All email logs deleted successfully'
     });
   } catch (error) {
+    console.error('Server error during log deletion:', error);
     return res.status(500).json({
       success: false,
       error: `Server error: ${error.message}`
@@ -2175,6 +2204,7 @@ const deleteAllEmailLogs = async (req, res) => {
   }
 };
 
+// Batch delete email logs
 const batchDeleteLogs = async (req, res) => {
   try {
     const { ids } = req.body;
@@ -2185,26 +2215,39 @@ const batchDeleteLogs = async (req, res) => {
       });
     }
     
-    const { error } = await supabase
-      .from('email_logs')
-      .delete()
-      .in('id', ids);
-    
-    if (error) {
-      if (error.code === '42P01') {
-        return res.status(404).json({
-          success: false,
-          error: 'Email logs table does not exist'
-        });
+    try {
+      const { error } = await supabase
+        .from('email_logs')
+        .delete()
+        .in('id', ids);
+      
+      if (error) {
+        if (error.code === '42P01') {
+          return res.status(404).json({
+            success: false,
+            error: 'Email logs table does not exist and in-memory storage is not initialized',
+            suggestion: 'Create an email_logs table in your database'
+          });
+        } else {
+          throw error;
+        }
       }
-      throw error;
+      
+      return res.status(200).json({
+        success: true,
+        message: `${ids.length} email logs deleted successfully`,
+        source: 'database'
+      });
+      
+    } catch (dbError) {
+      console.error('Database error:', dbError);
+      return res.status(500).json({
+        success: false,
+        error: `Database error: ${dbError.message}`
+      });
     }
-    
-    return res.status(200).json({
-      success: true,
-      message: `${ids.length} email logs deleted successfully`
-    });
   } catch (error) {
+    console.error('Server error:', error);
     return res.status(500).json({
       success: false,
       error: `Server error: ${error.message}`
