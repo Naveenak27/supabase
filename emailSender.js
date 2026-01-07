@@ -995,11 +995,17 @@ console.log('Environment loaded:', {
 });
 
 
-// Brevo SDK
 const Brevo = require('@getbrevo/brevo');
+
+// Create instance
 const brevoApi = new Brevo.TransactionalEmailsApi();
-// Set API key
-brevoApi.authentications.apiKey.apiKey = process.env.BREVO_API_KEY;
+
+// Set authentication - try this method first
+brevoApi.setApiKey(
+  Brevo.TransactionalEmailsApiApiKeys.apiKey, 
+  process.env.BREVO_API_KEY
+);
+
 
 // Helper to build Brevo attachment from a file path (base64)
 const fileToBase64Attachment = (attachmentPath) => {
