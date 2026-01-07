@@ -1673,15 +1673,53 @@ const resumeUpload = multer({
 }).single('resume');
 
 // Function to send email to a single recipient with optional attachment via Brevo
+// const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
+//   const sendSmtpEmail = new Brevo.SendSmtpEmail();
+
+//   sendSmtpEmail.subject = subject;
+//   sendSmtpEmail.htmlContent = html;
+//   sendSmtpEmail.sender = {
+//     email: process.env.BREVO_SENDER_EMAIL,
+//     name: process.env.BREVO_SENDER_NAME || undefined,
+//   };
+
+
 const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
-  const sendSmtpEmail = new Brevo.SendSmtpEmail();
+  console.log('=== BREVO DEBUG INFO ===');
+  console.log('API Key present?', !!process.env.BREVO_API_KEY);
+  console.log('API Key starts with:', process.env.BREVO_API_KEY?.substring(0, 15));
+  console.log('Sender Email:', process.env.BREVO_SENDER_EMAIL);
+  console.log('Recipient:', recipient);
+  console.log('=======================');
+
+  const sendSmtpEmail = new SendSmtpEmail();
 
   sendSmtpEmail.subject = subject;
   sendSmtpEmail.htmlContent = html;
   sendSmtpEmail.sender = {
     email: process.env.BREVO_SENDER_EMAIL,
-    name: process.env.BREVO_SENDER_NAME || undefined,
+    name: process.env.BREVO_SENDER_NAME || 'Rayi',
   };
+  sendSmtpEmail.to = [{ email: recipient }];
+
+  if (attachmentPath && fs.existsSync(attachmentPath)) {
+    sendSmtpEmail.attachment = [fileToBase64Attachment(attachmentPath)];
+  }
+
+  try {
+    const response = await brevoApi.sendTransacEmail(sendSmtpEmail);
+    console.log('✅ Brevo response:', response);
+    return response;
+  } catch (error) {
+    console.error('❌ Brevo API Error Details:');
+    console.error('Status:', error.response?.status);
+    console.error('Status Text:', error.response?.statusText);
+    console.error('Response Data:', error.response?.data);
+    console.error('Full Error:', error.message);
+    throw error;
+  }
+};
+
   sendSmtpEmail.to = [{ email: recipient }];
 
   if (attachmentPath && fs.existsSync(attachmentPath)) {
