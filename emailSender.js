@@ -983,6 +983,635 @@
 
 // Replaced Nodemailer SMTP with Brevo TransactionalEmailsApi
 
+// const { supabase, emailStorage } = require('./emailHandlers');
+// const multer = require('multer');
+// const path = require('path');
+// const fs = require('fs');
+// require('dotenv').config();
+
+// // Brevo SDK
+// const Brevo = require('@getbrevo/brevo');
+// const brevoApi = new Brevo.TransactionalEmailsApi();
+// // Set API key
+// brevoApi.authentications.apiKey.apiKey = process.env.BREVO_API_KEY;
+
+// // Helper to build Brevo attachment from a file path (base64)
+// const fileToBase64Attachment = (attachmentPath) => {
+//   const content = fs.readFileSync(attachmentPath).toString('base64');
+//   return {
+//     name: path.basename(attachmentPath),
+//     content, // base64 string
+//   };
+// };
+
+// // Configure multer for resume uploads
+// const resumeStorage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     const uploadDir = path.join(__dirname, 'resume_uploads');
+//     if (!fs.existsSync(uploadDir)) {
+//       fs.mkdirSync(uploadDir, { recursive: true });
+//     }
+//     cb(null, uploadDir);
+//   },
+//   filename: (req, file, cb) => {
+//     cb(null, `${Date.now()}-${file.originalname}`);
+//   }
+// });
+
+// const resumeUpload = multer({ 
+//   storage: resumeStorage,
+//   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+//   fileFilter: (req, file, cb) => {
+//     const filetypes = /pdf|docx/;
+//     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+//     const mimetype = filetypes.test(file.mimetype);
+    
+//     if (mimetype && extname) {
+//       return cb(null, true);
+//     } else {
+//       cb(new Error('Error: Only PDF and DOCX files are allowed!'));
+//     }
+//   }
+// }).single('resume');
+
+// // Function to send email to a single recipient with optional attachment via Brevo
+// const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
+//   const sendSmtpEmail = new Brevo.SendSmtpEmail();
+
+//   sendSmtpEmail.subject = subject;
+//   sendSmtpEmail.htmlContent = html;
+//   sendSmtpEmail.sender = {
+//     email: process.env.BREVO_SENDER_EMAIL,
+//     name: process.env.BREVO_SENDER_NAME || undefined,
+//   };
+//   sendSmtpEmail.to = [{ email: recipient }];
+
+//   if (attachmentPath && fs.existsSync(attachmentPath)) {
+//     sendSmtpEmail.attachment = [fileToBase64Attachment(attachmentPath)];
+//   }
+
+//   // Send through Brevo Transactional Email API
+//   // Returns a promise resolving with API response (contains messageId, etc.)
+//   return brevoApi.sendTransacEmail(sendSmtpEmail);
+// };
+
+// // Log email sending result to database
+// const logEmailResult = async (email, subject, status, errorMessage = null) => {
+//   try {
+//     const timestamp = new Date().toISOString();
+//     const logEntry = {
+//       email,
+//       subject,
+//       status, // 'success' or 'failed' or 'skipped' or 'campaign_summary'
+//       error_message: errorMessage,
+//       sent_at: timestamp
+//     };
+
+//     const { data, error } = await supabase
+//       .from('email_logs')
+//       .insert([logEntry]);
+    
+//     if (error) {
+//       console.error('Failed to log email result to database:', error);
+//       if (!global.emailLogs) {
+//         global.emailLogs = [];
+//       }
+//       global.emailLogs.push(logEntry);
+//     }
+    
+//     return logEntry;
+//   } catch (error) {
+//     console.error('Error logging email result:', error);
+//     return null;
+//   }
+// };
+
+// // Process the request with multer file upload middleware
+// const processFileUpload = (req, res) => {
+//   return new Promise((resolve, reject) => {
+//     resumeUpload(req, res, (err) => {
+//       if (err) {
+//         reject(err);
+//       } else {
+//         resolve();
+//       }
+//     });
+//   });
+// };
+
+// // Check if email has already been sent successfully
+// const checkIfEmailAlreadySent = async (email, subject) => {
+//   try {
+//     const { data, error } = await supabase
+//       .from('email_logs')
+//       .select('*')
+//       .eq('email', email)
+//       .eq('subject', subject)
+//       .eq('status', 'success')
+//       .limit(1);
+    
+//     if (error) {
+//       console.error('Error checking email log:', error);
+//       if (global.emailLogs) {
+//         const found = global.emailLogs.find(log => 
+//           log.email === email && 
+//           log.subject === subject && 
+//           log.status === 'success'
+//         );
+//         return !!found;
+//       }
+//       return false;
+//     }
+    
+//     return data && data.length > 0;
+    
+//   } catch (error) {
+//     console.error('Error checking if email was already sent:', error);
+//     return false;
+//   }
+// };
+
+// const getEmailLogs = async (req, res) => {
+//   try {
+//     const { data, error } = await supabase
+//       .from('email_logs')
+//       .select('*')
+//       .order('sent_at', { ascending: false });
+
+//     if (error) {
+//       console.error('Error fetching email logs:', error);
+//       const memoryLogs = global.emailLogs || [];
+
+//       const successfulEmails = memoryLogs
+//         .filter(log => log.status === 'success')
+//         .map(log => log.email);
+
+//       const skippedEmails = memoryLogs
+//         .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
+//         .map(log => log.email);
+
+//       return res.status(200).json({
+//         success: true,
+//         data: memoryLogs,
+//         successfulEmails,
+//         skippedEmails,
+//         source: 'memory'
+//       });
+//     }
+
+//     const successfulEmails = data
+//       .filter(log => log.status === 'success')
+//       .map(log => log.email);
+
+//     const skippedEmails = data
+//       .filter(log => log.status === 'failed' && log.error_message && log.error_message.includes('SKIPPED:'))
+//       .map(log => log.email);
+
+//     return res.status(200).json({
+//       success: true,
+//       data: data,
+//       successfulEmails,
+//       skippedEmails,
+//       source: 'database'
+//     });
+//   } catch (error) {
+//     console.error('Server error fetching logs:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+// // Controller for sending emails to all recipients in DB
+// const sendEmailsToAll = async (req, res) => {
+//   try {
+//     // First, process any file upload (resume)
+//     try {
+//       await processFileUpload(req, res);
+//     } catch (uploadError) {
+//       return res.status(400).json({
+//         success: false,
+//         error: `File upload error: ${uploadError.message}`
+//       });
+//     }
+
+//     const emailSubject = req.body.subject;
+//     const emailContent = req.body.content;
+    
+//     if (!emailSubject || !emailContent) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Email subject and content are required'
+//       });
+//     }
+
+//     const resumePath = req.file ? req.file.path : null;
+
+//     // Get all ACTIVE emails
+//     let emails = [];
+//     try {
+//       const { data, error } = await supabase
+//         .from('emails')
+//         .select('email')
+//         .eq('active', 1);
+      
+//       if (error && error.code === '42P01') {
+//         emails = emailStorage
+//           .filter(item => item.active === 1)
+//           .map(item => item.email);
+//       } else if (error) {
+//         throw error;
+//       } else {
+//         emails = data.map(item => item.email);
+//       }
+//     } catch (dbError) {
+//       console.error('Database error:', dbError);
+//       return res.status(500).json({
+//         success: false,
+//         error: `Database error: ${dbError.message}`
+//       });
+//     }
+
+//     if (emails.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'No active emails found to send to'
+//       });
+//     }
+
+//     console.log(`Preparing to send emails to ${emails.length} active recipients`);
+//     console.log(`Email subject: ${emailSubject}`);
+//     console.log(`Email content: ${emailContent.substring(0, 100)}...`);
+//     if (resumePath) {
+//       console.log(`Attaching resume: ${resumePath}`);
+//     }
+
+//     const results = { 
+//       success: [], 
+//       failed: [],
+//       skipped: []
+//     };
+    
+//     const campaignId = Date.now().toString();
+    
+// const getRandomDelay = () => {
+//   const minDelay = 420000; // 7 min
+//   const maxDelay = 600000; // 10 min
+//   return Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+// };
+
+    
+//     for (let i = 0; i < emails.length; i++) {
+//       const email = emails[i];
+      
+//       const alreadySent = await checkIfEmailAlreadySent(email, emailSubject);
+//       if (alreadySent) {
+//         console.log(`⏭️ Skipping email to ${email}: already sent successfully`);
+//         results.skipped.push(email);
+//         await logEmailResult(email, emailSubject, 'skipped', 'Email already sent successfully');
+//         continue;
+//       }
+      
+//       try {
+//         await sendEmail(email, emailSubject, emailContent, resumePath);
+//         results.success.push(email);
+//         console.log(`✅ Email sent successfully to: ${email}`);
+//         await logEmailResult(email, emailSubject, 'success');
+//       } catch (error) {
+//         console.error(`❌ Failed to send email to ${email}:`, error.message);
+//         results.failed.push({ email, error: error.message });
+//         await logEmailResult(email, emailSubject, 'failed', error.message);
+//       }
+      
+//       if (i < emails.length - 1) {
+//         const delayMs = getRandomDelay();
+//         const delayMinutes = (delayMs / 60000).toFixed(1);
+//         console.log(`Waiting ${delayMinutes} minutes (${delayMs}ms) before sending the next email...`);
+//         await new Promise(resolve => setTimeout(resolve, delayMs));
+//       }
+//     }
+
+//     await logEmailResult(
+//       process.env.BREVO_SENDER_EMAIL, 
+//       `Campaign Summary: ${emailSubject}`,
+//       'campaign_summary', 
+//       JSON.stringify({
+//         campaignId,
+//         totalEmails: emails.length,
+//         successful: results.success.length,
+//         failed: results.failed.length,
+//         skipped: results.skipped.length
+//       })
+//     );
+
+//     if (resumePath && fs.existsSync(resumePath)) {
+//       try {
+//         fs.unlinkSync(resumePath);
+//         console.log(`Deleted temporary file: ${resumePath}`);
+//       } catch (deleteError) {
+//         console.error(`Error deleting file: ${deleteError.message}`);
+//       }
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       sentCount: results.success.length,
+//       failedCount: results.failed.length,
+//       skippedCount: results.skipped.length,
+//       totalAttempted: emails.length,
+//       campaignId,
+//       failedEmails: results.failed.length > 0 ? results.failed : undefined,
+//       skippedEmails: results.skipped.length > 0 ? results.skipped : undefined
+//     });
+    
+//   } catch (error) {
+//     console.error('Server error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+// // Secondary multer storage for single email upload endpoint
+// const storage = multer.diskStorage({
+//   destination: function (req, file, cb) {
+//     const uploadDir = path.join(__dirname, 'uploads');
+//     if (!fs.existsSync(uploadDir)) {
+//       fs.mkdirSync(uploadDir, { recursive: true });
+//     }
+//     cb(null, uploadDir);
+//   },
+//   filename: function (req, file, cb) {
+//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+//     cb(null, uniqueSuffix + '-' + file.originalname);
+//   }
+// });
+
+// const upload = multer({ 
+//   storage: storage,
+//   limits: {
+//     fileSize: 10 * 1024 * 1024, // 10MB
+//   },
+//   fileFilter: (req, file, cb) => {
+//     if (
+//       file.mimetype === 'application/pdf' || 
+//       file.mimetype === 'application/msword' || 
+//       file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+//     ) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error('Only PDF and Word documents are allowed'));
+//     }
+//   }
+// });
+
+// const uploadMiddleware = upload.single('file');
+
+// // Controller for sending an email to a single recipient
+// const sendSingleEmail = async (req, res) => {
+//   uploadMiddleware(req, res, async (err) => {
+//     if (err) {
+//       console.error('File upload error:', err);
+//       return res.status(400).json({
+//         success: false,
+//         error: `File upload error: ${err.message}`
+//       });
+//     }
+
+//     try {
+//       let resumePath = null;
+//       if (req.file) {
+//         resumePath = req.file.path;
+//         console.log(`File uploaded successfully to: ${resumePath}`);
+//       }
+
+//       const { subject, content, recipients: recipientsInput } = req.body;
+//       console.log('Received form data:', {
+//         subject,
+//         content,
+//         recipientsInput
+//       });
+
+//       let recipients;
+//       if (typeof recipientsInput === 'string') {
+//         try {
+//           recipients = JSON.parse(recipientsInput);
+//         } catch (e) {
+//           recipients = [recipientsInput];
+//         }
+//       } else {
+//         recipients = recipientsInput;
+//       }
+
+//       if (!subject || !content || !recipients || !Array.isArray(recipients) || recipients.length === 0) {
+//         if (resumePath && fs.existsSync(resumePath)) {
+//           fs.unlinkSync(resumePath);
+//         }
+//         return res.status(400).json({
+//           success: false,
+//           error: 'Email subject, content, and at least one recipient are required'
+//         });
+//       }
+
+//       const recipient = recipients[0];
+//       console.log(`Preparing to send email to: ${recipient}`);
+//       console.log(`Email subject: ${subject}`);
+//       console.log(`Email content: ${content.substring(0, 100)}...`);
+
+//       try {
+//         const alreadySent = await checkIfEmailAlreadySent(recipient, subject);
+//         if (alreadySent) {
+//           console.log(`⏭️ Skipping email to ${recipient}: already sent successfully`);
+//           if (resumePath && fs.existsSync(resumePath)) {
+//             fs.unlinkSync(resumePath);
+//           }
+          
+//           return res.status(200).json({
+//             success: true,
+//             message: `Email to ${recipient} was already sent successfully`,
+//             status: 'skipped'
+//           });
+//         }
+
+//         await sendEmail(recipient, subject, content, resumePath);
+//         await logEmailResult(recipient, subject, 'success');
+//         console.log(`✅ Email sent successfully to: ${recipient}`);
+        
+//         if (resumePath && fs.existsSync(resumePath)) {
+//           try {
+//             fs.unlinkSync(resumePath);
+//             console.log(`Deleted temporary file: ${resumePath}`);
+//           } catch (deleteError) {
+//             console.error(`Error deleting file: ${deleteError.message}`);
+//           }
+//         }
+        
+//         return res.status(200).json({
+//           success: true,
+//           message: `Email sent successfully to ${recipient}`
+//         });
+//       } catch (error) {
+//         console.error(`❌ Failed to send email to ${recipient}:`, error.message);
+//         await logEmailResult(recipient, subject, 'failed', error.message);
+//         if (resumePath && fs.existsSync(resumePath)) {
+//           fs.unlinkSync(resumePath);
+//         }
+//         return res.status(500).json({
+//           success: false,
+//           error: `Failed to send email: ${error.message}`
+//         });
+//       }
+//     } catch (error) {
+//       console.error('Server error:', error);
+//       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+//         fs.unlinkSync(req.file.path);
+//       }
+//       return res.status(500).json({
+//         success: false,
+//         error: `Server error: ${error.message}`
+//       });
+//     }
+//   });
+// };
+
+// // Delete a single email log
+// const deleteEmailLog = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { error } = await supabase
+//       .from('email_logs')
+//       .delete()
+//       .eq('id', id);
+    
+//     if (error) {
+//       console.error('Error deleting email log:', error);
+//       if (global.emailLogs) {
+//         const index = global.emailLogs.findIndex(log => log.id === id);
+//         if (index !== -1) {
+//           global.emailLogs.splice(index, 1);
+//           return res.status(200).json({
+//             success: true,
+//             message: 'Log deleted successfully from memory'
+//           });
+//         }
+//       }
+//       return res.status(500).json({
+//         success: false,
+//         error: `Database error: ${error.message}`
+//       });
+//     }
+    
+//     return res.status(200).json({
+//       success: true,
+//       message: 'Log deleted successfully'
+//     });
+//   } catch (error) {
+//     console.error('Server error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+// // Delete all email logs
+// const deleteAllEmailLogs = async (req, res) => {
+//   try {
+//     console.log('Starting deletion of all email logs...');
+//     const { data, error } = await supabase.rpc('truncate_email_logs');
+    
+//     if (error) {
+//       console.error('Error deleting all email logs:', error);
+//       const { error: deleteError } = await supabase.from('email_logs').delete();
+//       if (deleteError) {
+//         console.error('Fallback deletion also failed:', deleteError);
+//         return res.status(500).json({
+//           success: false,
+//           error: `Could not delete logs: ${deleteError.message}`
+//         });
+//       }
+//     }
+    
+//     if (global.emailLogs) {
+//       global.emailLogs = [];
+//     }
+    
+//     console.log('Successfully deleted all email logs');
+//     return res.status(200).json({
+//       success: true,
+//       message: 'All email logs deleted successfully'
+//     });
+//   } catch (error) {
+//     console.error('Server error during log deletion:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+// const batchDeleteLogs = async (req, res) => {
+//   try {
+//     const { ids } = req.body;
+//     if (!ids || !Array.isArray(ids) || ids.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Valid array of email log IDs is required'
+//       });
+//     }
+    
+//     try {
+//       const { error } = await supabase
+//         .from('email_logs')
+//         .delete()
+//         .in('id', ids);
+      
+//       if (error) {
+//         if (error.code === '42P01') {
+//           return res.status(404).json({
+//             success: false,
+//             error: 'Email logs table does not exist and in-memory storage is not initialized',
+//             suggestion: 'Create an email_logs table in your database'
+//           });
+//         } else {
+//           throw error;
+//         }
+//       }
+      
+//       return res.status(200).json({
+//         success: true,
+//         message: `${ids.length} email logs deleted successfully`,
+//         source: 'database'
+//       });
+      
+//     } catch (dbError) {
+//       console.error('Database error:', dbError);
+//       return res.status(500).json({
+//         success: false,
+//         error: `Database error: ${dbError.message}`
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Server error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: `Server error: ${error.message}`
+//     });
+//   }
+// };
+
+// module.exports = {
+//   sendEmailsToAll,
+//   sendSingleEmail,
+//   getEmailLogs,
+//   deleteEmailLog,
+//   deleteAllEmailLogs,
+//   batchDeleteLogs
+// };
+
+
 const { supabase, emailStorage } = require('./emailHandlers');
 const multer = require('multer');
 const path = require('path');
@@ -991,9 +1620,18 @@ require('dotenv').config();
 
 // Brevo SDK
 const Brevo = require('@getbrevo/brevo');
-const brevoApi = new Brevo.TransactionalEmailsApi();
+const { TransactionalEmailsApi, TransactionalEmailsApiApiKeys, SendSmtpEmail } = Brevo;
+const brevoApi = new TransactionalEmailsApi();
 // Set API key
-brevoApi.authentications.apiKey.apiKey = process.env.BREVO_API_KEY;
+// brevoApi.authentications.apiKey.apiKey = process.env.BREVO_API_KEY;
+
+brevoApi.setApiKey(
+  TransactionalEmailsApiApiKeys.apiKey, 
+  process.env.BREVO_API_KEY
+);
+
+console.log('✅ Brevo API Key configured:', process.env.BREVO_API_KEY?.substring(0, 20) + '...');
+console.log('✅ Sender Email:', process.env.BREVO_SENDER_EMAIL);
 
 // Helper to build Brevo attachment from a file path (base64)
 const fileToBase64Attachment = (attachmentPath) => {
@@ -1610,5 +2248,14 @@ module.exports = {
   deleteAllEmailLogs,
   batchDeleteLogs
 };
+
+
+
+
+
+
+
+
+
 
 
