@@ -1673,15 +1673,15 @@ const resumeUpload = multer({
 }).single('resume');
 
 // Function to send email to a single recipient with optional attachment via Brevo
-// const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
-//   const sendSmtpEmail = new Brevo.SendSmtpEmail();
+const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
+  const sendSmtpEmail = new Brevo.SendSmtpEmail();
 
-//   sendSmtpEmail.subject = subject;
-//   sendSmtpEmail.htmlContent = html;
-//   sendSmtpEmail.sender = {
-//     email: process.env.BREVO_SENDER_EMAIL,
-//     name: process.env.BREVO_SENDER_NAME || undefined,
-//   };
+  sendSmtpEmail.subject = subject;
+  sendSmtpEmail.htmlContent = html;
+  sendSmtpEmail.sender = {
+    email: process.env.BREVO_SENDER_EMAIL,
+    name: process.env.BREVO_SENDER_NAME || undefined,
+  };
 
 
 const sendEmail = async (recipient, subject, html, attachmentPath = null) => {
