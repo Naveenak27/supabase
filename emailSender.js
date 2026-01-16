@@ -3284,8 +3284,6 @@
 
 
 
-
-
 const { supabase, emailStorage } = require('./emailHandlers');
 const multer = require('multer');
 const path = require('path');
@@ -3409,72 +3407,114 @@ const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 // Download file from Supabase storage and save temporarily
 const downloadFromSupabase = async (storagePath, bucketName = 'resumes') => {
   try {
-    console.log(`Downloading from Supabase: ${bucketName}/${storagePath}`);
+    // Clean up the path - remove bucket name if included and normalize
+    let cleanPath = storagePath;
+    if (cleanPath.startsWith(`${bucketName}/`)) {
+      cleanPath = cleanPath.substring(bucketName.length + 1);
+    }
+    
+    console.log(`Downloading from Supabase: bucket="${bucketName}", path="${cleanPath}"`);
     
     // Try exact match first
     let { data, error } = await supabase.storage
       .from(bucketName)
-      .download(storagePath);
+      .download(cleanPath);
     
     // If exact match fails, try to find similar filename
     if (error) {
-      console.log(`❌ Exact match failed: ${error.message}`);
-      console.log(`🔍 Searching for similar filenames...`);
+      console.log(`❌ Exact match failed for "${cleanPath}"`);
+      console.log(`Error details:`, error.message || JSON.stringify(error));
+      console.log(`🔍 Listing all files in bucket to find match...`);
       
-      // List all files in bucket
+      // List all files in bucket (with empty path to list root)
       const { data: fileList, error: listError } = await supabase.storage
         .from(bucketName)
-        .list('', { limit: 100 });
+        .list('', { 
+          limit: 1000,
+          sortBy: { column: 'name', order: 'asc' }
+        });
       
-      if (!listError && fileList && fileList.length > 0) {
-        console.log(`📁 Found ${fileList.length} files in bucket`);
+      if (listError) {
+        console.error('❌ Failed to list bucket files:', listError);
+        throw new Error(`Cannot access Supabase storage bucket "${bucketName}": ${listError.message}`);
+      }
+      
+      if (!fileList || fileList.length === 0) {
+        console.error(`❌ Bucket "${bucketName}" is empty or inaccessible`);
+        throw new Error(`No files found in Supabase bucket "${bucketName}"`);
+      }
+      
+      console.log(`📁 Found ${fileList.length} files in bucket "${bucketName}":`);
+      fileList.forEach(f => console.log(`   - ${f.name}`));
+      
+      // Normalize the search filename (remove numbers, dashes, spaces, etc)
+      const normalizeFilename = (filename) => {
+        return filename
+          .toLowerCase()
+          .replace(/\.pdf$/i, '')     // Remove .pdf extension
+          .replace(/\.docx$/i, '')    // Remove .docx extension
+          .replace(/[-_\s]+\d+$/g, '') // Remove trailing -1, -2, _1, etc
+          .replace(/[-_\s]+/g, '')    // Remove all dashes, underscores, spaces
+          .trim();
+      };
+      
+      const normalizedSearch = normalizeFilename(cleanPath);
+      console.log(`🔎 Searching for normalized match: "${cleanPath}" → "${normalizedSearch}"`);
+      
+      // Find best match
+      let bestMatch = null;
+      let bestScore = 0;
+      
+      for (const file of fileList) {
+        const normalizedFile = normalizeFilename(file.name);
         
-        // Normalize the search filename (remove numbers, dashes, etc)
-        const normalizeFilename = (filename) => {
-          return filename
-            .toLowerCase()
-            .replace(/[-_\s]\d+/g, '') // Remove -1, -2, _1, etc
-            .replace(/\s+/g, '-')      // Replace spaces with dashes
-            .trim();
-        };
-        
-        const normalizedSearch = normalizeFilename(storagePath);
-        console.log(`🔎 Looking for normalized match: "${normalizedSearch}"`);
-        
-        // Find best match
-        let bestMatch = null;
-        for (const file of fileList) {
-          const normalizedFile = normalizeFilename(file.name);
-          console.log(`   Comparing with: "${file.name}" -> "${normalizedFile}"`);
-          
-          if (normalizedFile === normalizedSearch || 
-              normalizedFile.includes(normalizedSearch) ||
-              normalizedSearch.includes(normalizedFile)) {
-            bestMatch = file.name;
-            console.log(`✅ Found match: "${file.name}"`);
-            break;
-          }
-        }
-        
-        // Try downloading the match
-        if (bestMatch) {
-          console.log(`📥 Downloading matched file: ${bestMatch}`);
-          const matchResult = await supabase.storage
-            .from(bucketName)
-            .download(bestMatch);
-          
-          data = matchResult.data;
-          error = matchResult.error;
+        // Calculate similarity score
+        let score = 0;
+        if (normalizedFile === normalizedSearch) {
+          score = 100; // Perfect match
+        } else if (normalizedFile.includes(normalizedSearch)) {
+          score = 80; // Contains search term
+        } else if (normalizedSearch.includes(normalizedFile)) {
+          score = 70; // Search contains file
         } else {
-          console.log('❌ No similar file found in Supabase');
-          console.log('Available files:', fileList.map(f => f.name).join(', '));
+          // Check word overlap
+          const searchWords = normalizedSearch.split(/[^a-z0-9]/);
+          const fileWords = normalizedFile.split(/[^a-z0-9]/);
+          const overlap = searchWords.filter(w => fileWords.includes(w)).length;
+          score = (overlap / Math.max(searchWords.length, fileWords.length)) * 60;
         }
+        
+        console.log(`   "${file.name}" → "${normalizedFile}" (score: ${score.toFixed(0)})`);
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = file.name;
+        }
+      }
+      
+      // Use match if score is good enough
+      if (bestMatch && bestScore >= 60) {
+        console.log(`✅ Best match found: "${bestMatch}" (score: ${bestScore.toFixed(0)})`);
+        
+        const matchResult = await supabase.storage
+          .from(bucketName)
+          .download(bestMatch);
+        
+        data = matchResult.data;
+        error = matchResult.error;
+        
+        if (error) {
+          console.error(`❌ Failed to download matched file "${bestMatch}":`, error);
+        }
+      } else {
+        console.log(`❌ No good match found (best score: ${bestScore.toFixed(0)})`);
+        console.log(`Available files in bucket:`, fileList.map(f => f.name).join(', '));
       }
     }
     
     if (error) {
-      console.error('Supabase download error:', error);
-      throw new Error(`Failed to download from Supabase: ${error.message}`);
+      console.error('❌ Supabase download failed:', error);
+      throw new Error(`Failed to download from Supabase: ${error.message || JSON.stringify(error)}`);
     }
     
     if (!data) {
@@ -3489,7 +3529,7 @@ const downloadFromSupabase = async (storagePath, bucketName = 'resumes') => {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    const filename = path.basename(storagePath);
+    const filename = path.basename(cleanPath);
     const tempPath = path.join(tempDir, `${Date.now()}-${filename}`);
     
     // Convert blob to buffer and save
@@ -3501,7 +3541,7 @@ const downloadFromSupabase = async (storagePath, bucketName = 'resumes') => {
     return tempPath;
     
   } catch (error) {
-    console.error('Error downloading from Supabase:', error);
+    console.error('❌ Error in downloadFromSupabase:', error.message);
     throw error;
   }
 };
@@ -3555,6 +3595,7 @@ const getResumePath = async (req) => {
   // Priority 4: DEFAULT FALLBACK - Use default resume from Supabase
   const DEFAULT_RESUME = process.env.DEFAULT_RESUME_NAME || 'K Kathirvel.pdf';
   console.log(`⚠️  No valid resume found, using DEFAULT: ${DEFAULT_RESUME}`);
+  console.log(`   (Set DEFAULT_RESUME_NAME in .env to change default)`);
   
   try {
     const bucketName = 'resumes';
@@ -3567,8 +3608,17 @@ const getResumePath = async (req) => {
   }
 };
 
-
-
+// Clean up temporary file
+const cleanupTempFile = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath) && filePath.includes('temp_downloads')) {
+      fs.unlinkSync(filePath);
+      console.log(`🗑️  Cleaned up temp file: ${filePath}`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up temp file:', error.message);
+  }
+};
 
 // ========== END SUPABASE STORAGE HELPERS ==========
 
@@ -4666,3 +4716,4 @@ module.exports = {
   getAvailableResumes,
  
 };
+
