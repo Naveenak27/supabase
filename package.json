@@ -15,6 +15,7 @@
     "file-upload"
   ],
   "dependencies": {
+    "sib-api-v3-sdk": "^8.5.0",
      "@sendgrid/mail": "^7.7.0",
     "@getbrevo/brevo": "^3.0.1",
     "@supabase/supabase-js": "^2.39.0",
