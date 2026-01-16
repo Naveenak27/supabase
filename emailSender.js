@@ -3303,6 +3303,7 @@ SETUP INSTRUCTIONS:
    BREVO_API_KEY=xkeysib-your-api-key-here
    BREVO_SENDER_EMAIL=your-verified-email@example.com
    BREVO_SENDER_NAME=Your Name
+   DEFAULT_RESUME_NAME=K Kathirvel.pdf  ← ADD THIS for automatic fallback
    DEBUG_MODE=true  (optional, for detailed logs)
 
 3. Add test route to your server.js:
@@ -3451,17 +3452,17 @@ const downloadFromSupabase = async (storagePath, bucketName = 'resumes') => {
 
 // Get resume path - either from uploaded file or Supabase storage
 const getResumePath = async (req) => {
-  // Priority 1: File uploaded in this request (only if valid size)
+  // Priority 1: File uploaded in this request (with validation)
   if (req.file && req.file.path && fs.existsSync(req.file.path)) {
     const stats = fs.statSync(req.file.path);
     
-    // Validate file size - reject if corrupted
+    // Validate file size - reject if corrupted (< 5KB)
     if (stats.size >= 5000) {
-      console.log('Using uploaded file from request (validated)');
+      console.log(`Using uploaded file from request (${stats.size} bytes)`);
       return { path: req.file.path, isTemp: false };
     } else {
-      console.warn(`Skipping corrupted upload (${stats.size} bytes), trying Supabase...`);
-      // Don't return, fall through to Supabase options
+      console.warn(`⚠️  Skipping corrupted upload (${stats.size} bytes), will use Supabase fallback...`);
+      // Don't return, fall through to Supabase
     }
   }
   
@@ -3481,7 +3482,21 @@ const getResumePath = async (req) => {
     return { path: tempPath, isTemp: true };
   }
   
-  return { path: null, isTemp: false };
+  // Priority 4: DEFAULT FALLBACK - Use default resume from Supabase
+  const DEFAULT_RESUME = process.env.DEFAULT_RESUME_NAME || 'K Kathirvel.pdf';
+  console.log(`⚠️  No valid resume provided, using DEFAULT: ${DEFAULT_RESUME}`);
+  console.log('   This happens when frontend sends corrupted file and no resumeFileName');
+  
+  try {
+    const bucketName = 'resumes';
+    const tempPath = await downloadFromSupabase(DEFAULT_RESUME, bucketName);
+    console.log('✅ Default resume loaded successfully from Supabase');
+    return { path: tempPath, isTemp: true };
+  } catch (error) {
+    console.error('❌ Failed to load default resume:', error.message);
+    console.error('To fix: Set DEFAULT_RESUME_NAME in .env or ensure file exists in Supabase');
+    throw new Error(`No valid resume available. Upload failed and no default set: ${error.message}`);
+  }
 };
 
 // Clean up temporary file
@@ -3699,7 +3714,17 @@ const downloadResumeFromSupabase = async (fileName, bucketName = 'resumes') => {
   }
 };
 
-
+// Helper function to clean up temporary files
+const cleanupTempFile = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('🗑️  Cleaned up temporary file:', filePath);
+    }
+  } catch (error) {
+    console.error('Error cleaning up temp file:', error.message);
+  }
+};
 
 // ========== END HELPER FUNCTIONS ==========
 
@@ -3712,7 +3737,19 @@ const fileToBase64Attachment = (attachmentPath) => {
     const content = fileBuffer.toString('base64');
     const filename = path.basename(attachmentPath);
     
-    console.log(`Creating attachment: ${filename}, size: ${fileBuffer.length} bytes`);
+    console.log(`\n========== ATTACHMENT ANALYSIS ==========`);
+    console.log(`File: ${filename}`);
+    console.log(`Size on disk: ${fileBuffer.length} bytes`);
+    console.log(`First 50 bytes (hex): ${fileBuffer.slice(0, 50).toString('hex')}`);
+    console.log(`First 50 bytes (text): ${fileBuffer.slice(0, 50).toString()}`);
+    console.log(`Base64 length: ${content.length} characters`);
+    console.log(`=========================================\n`);
+    
+    if (fileBuffer.length < 5000) {
+      console.error(`⚠️  WARNING: File is only ${fileBuffer.length} bytes - this is NOT a real PDF!`);
+      console.error(`A typical PDF resume is 50KB-500KB`);
+      console.error(`Your frontend is sending a corrupted/incomplete file`);
+    }
     
     return {
       content: content,
@@ -3985,41 +4022,9 @@ const sendEmailsToAll = async (req, res) => {
     }
 
     // Get resume path - from upload or Supabase storage
-    let resumePath = null;
-    let needsCleanup = false;
-    
-    // FIRST: Validate uploaded file if present
-    if (req.file) {
-      const stats = fs.existsSync(req.file.path) ? fs.statSync(req.file.path) : null;
-      
-      if (!stats || stats.size < 5000) {
-        // File is corrupted or too small (< 5KB)
-        console.error(`❌ REJECTING corrupted upload: ${stats ? stats.size : 0} bytes`);
-        
-        // Delete corrupted file
-        if (req.file.path && fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
-        
-        // Try to use Supabase storage instead
-        if (!req.body.resumeFileName && !req.body.resumeStoragePath) {
-          return res.status(400).json({
-            success: false,
-            error: `Uploaded file is corrupted (${stats ? stats.size : 0} bytes). Expected 10KB-500KB.`,
-            hint: 'Frontend is not sending file correctly. Provide resumeFileName to use Supabase storage instead.',
-            actualSize: stats ? stats.size : 0,
-            expectedMinimum: 5000
-          });
-        }
-        
-        console.log('⚠️  Will attempt Supabase storage instead of corrupted upload');
-      }
-    }
-    
-    // SECOND: Get valid resume path
     const resumeResult = await getResumePath(req);
-    resumePath = resumeResult.path;
-    needsCleanup = resumeResult.isTemp;
+    const resumePath = resumeResult.path;
+    const needsCleanup = resumeResult.isTemp;
     
     console.log('\n========== FILE UPLOAD DIAGNOSTIC ==========');
     // Debug file upload
@@ -4250,50 +4255,19 @@ const sendSingleEmail = async (req, res) => {
     }
 
     try {
-      let resumePath = null;
-      let needsCleanup = false;
+      // Get resume path - from upload or Supabase storage
+      const resumeResult = await getResumePath(req);
+      const resumePath = resumeResult.path;
+      const needsCleanup = resumeResult.isTemp;
       
       if (req.file) {
-        console.log(`File uploaded successfully to: ${req.file.path}`);
+        console.log(`File uploaded to: ${req.file.path}`);
         console.log('File details:', {
           filename: req.file.filename,
           originalname: req.file.originalname,
           size: req.file.size,
           mimetype: req.file.mimetype
         });
-        
-        // Verify and validate file
-        if (fs.existsSync(req.file.path)) {
-          const stats = fs.statSync(req.file.path);
-          console.log(`File verified on disk: ${stats.size} bytes`);
-          
-          // Validate file size
-          if (stats.size < 5000) {
-            console.error(`❌ REJECTING corrupted file: ${stats.size} bytes`);
-            fs.unlinkSync(req.file.path);
-            
-            // Check if Supabase storage option provided
-            if (!req.body.resumeFileName && !req.body.resumeStoragePath) {
-              return res.status(400).json({
-                success: false,
-                error: `Uploaded file is corrupted (${stats.size} bytes). Expected minimum 5KB.`,
-                hint: 'Provide resumeFileName to use file from Supabase storage instead.',
-                actualSize: stats.size
-              });
-            }
-            console.log('⚠️  Will use Supabase storage instead');
-            resumePath = null; // Clear corrupted path
-          } else {
-            resumePath = req.file.path;
-          }
-        }
-      }
-      
-      // Try Supabase storage if no valid upload
-      if (!resumePath) {
-        const resumeResult = await getResumePath(req);
-        resumePath = resumeResult.path;
-        needsCleanup = resumeResult.isTemp;
       }
 
       const { subject, content, recipients: recipientsInput } = req.body;
