@@ -3411,10 +3411,66 @@ const downloadFromSupabase = async (storagePath, bucketName = 'resumes') => {
   try {
     console.log(`Downloading from Supabase: ${bucketName}/${storagePath}`);
     
-    // Download file from Supabase storage
-    const { data, error } = await supabase.storage
+    // Try exact match first
+    let { data, error } = await supabase.storage
       .from(bucketName)
       .download(storagePath);
+    
+    // If exact match fails, try to find similar filename
+    if (error) {
+      console.log(`❌ Exact match failed: ${error.message}`);
+      console.log(`🔍 Searching for similar filenames...`);
+      
+      // List all files in bucket
+      const { data: fileList, error: listError } = await supabase.storage
+        .from(bucketName)
+        .list('', { limit: 100 });
+      
+      if (!listError && fileList && fileList.length > 0) {
+        console.log(`📁 Found ${fileList.length} files in bucket`);
+        
+        // Normalize the search filename (remove numbers, dashes, etc)
+        const normalizeFilename = (filename) => {
+          return filename
+            .toLowerCase()
+            .replace(/[-_\s]\d+/g, '') // Remove -1, -2, _1, etc
+            .replace(/\s+/g, '-')      // Replace spaces with dashes
+            .trim();
+        };
+        
+        const normalizedSearch = normalizeFilename(storagePath);
+        console.log(`🔎 Looking for normalized match: "${normalizedSearch}"`);
+        
+        // Find best match
+        let bestMatch = null;
+        for (const file of fileList) {
+          const normalizedFile = normalizeFilename(file.name);
+          console.log(`   Comparing with: "${file.name}" -> "${normalizedFile}"`);
+          
+          if (normalizedFile === normalizedSearch || 
+              normalizedFile.includes(normalizedSearch) ||
+              normalizedSearch.includes(normalizedFile)) {
+            bestMatch = file.name;
+            console.log(`✅ Found match: "${file.name}"`);
+            break;
+          }
+        }
+        
+        // Try downloading the match
+        if (bestMatch) {
+          console.log(`📥 Downloading matched file: ${bestMatch}`);
+          const matchResult = await supabase.storage
+            .from(bucketName)
+            .download(bestMatch);
+          
+          data = matchResult.data;
+          error = matchResult.error;
+        } else {
+          console.log('❌ No similar file found in Supabase');
+          console.log('Available files:', fileList.map(f => f.name).join(', '));
+        }
+      }
+    }
     
     if (error) {
       console.error('Supabase download error:', error);
@@ -3461,8 +3517,22 @@ const getResumePath = async (req) => {
       console.log(`Using uploaded file from request (${stats.size} bytes)`);
       return { path: req.file.path, isTemp: false };
     } else {
-      console.warn(`⚠️  Skipping corrupted upload (${stats.size} bytes), will use Supabase fallback...`);
-      // Don't return, fall through to Supabase
+      console.warn(`⚠️  Corrupted upload detected (${stats.size} bytes)`);
+      console.log(`📝 File name from upload: ${req.file.originalname}`);
+      console.log(`🔄 Will attempt to download this file from Supabase instead...`);
+      
+      // Try to find the file in Supabase using the originalname
+      try {
+        const bucketName = 'resumes';
+        console.log(`Searching Supabase for: ${req.file.originalname}`);
+        const tempPath = await downloadFromSupabase(req.file.originalname, bucketName);
+        console.log('✅ Found and downloaded from Supabase!');
+        return { path: tempPath, isTemp: true };
+      } catch (supabaseError) {
+        console.warn(`⚠️  File "${req.file.originalname}" not found in Supabase`);
+        console.log('Will try other fallback options...');
+        // Continue to other priorities
+      }
     }
   }
   
@@ -3484,8 +3554,7 @@ const getResumePath = async (req) => {
   
   // Priority 4: DEFAULT FALLBACK - Use default resume from Supabase
   const DEFAULT_RESUME = process.env.DEFAULT_RESUME_NAME || 'K Kathirvel.pdf';
-  console.log(`⚠️  No valid resume provided, using DEFAULT: ${DEFAULT_RESUME}`);
-  console.log('   This happens when frontend sends corrupted file and no resumeFileName');
+  console.log(`⚠️  No valid resume found, using DEFAULT: ${DEFAULT_RESUME}`);
   
   try {
     const bucketName = 'resumes';
@@ -3494,22 +3563,12 @@ const getResumePath = async (req) => {
     return { path: tempPath, isTemp: true };
   } catch (error) {
     console.error('❌ Failed to load default resume:', error.message);
-    console.error('To fix: Set DEFAULT_RESUME_NAME in .env or ensure file exists in Supabase');
-    throw new Error(`No valid resume available. Upload failed and no default set: ${error.message}`);
+    throw new Error(`No valid resume available: ${error.message}`);
   }
 };
 
-// Clean up temporary file
-const cleanupTempFile = (filePath) => {
-  try {
-    if (filePath && fs.existsSync(filePath) && filePath.includes('temp_downloads')) {
-      fs.unlinkSync(filePath);
-      console.log(`🗑️  Cleaned up temp file: ${filePath}`);
-    }
-  } catch (error) {
-    console.error('Error cleaning up temp file:', error.message);
-  }
-};
+
+
 
 // ========== END SUPABASE STORAGE HELPERS ==========
 
@@ -3714,7 +3773,17 @@ const downloadResumeFromSupabase = async (fileName, bucketName = 'resumes') => {
   }
 };
 
-
+// Helper function to clean up temporary files
+const cleanupTempFile = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('🗑️  Cleaned up temporary file:', filePath);
+    }
+  } catch (error) {
+    console.error('Error cleaning up temp file:', error.message);
+  }
+};
 
 // ========== END HELPER FUNCTIONS ==========
 
@@ -4597,4 +4666,3 @@ module.exports = {
   getAvailableResumes,
  
 };
-
