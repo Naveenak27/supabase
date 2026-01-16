@@ -1906,11 +1906,12 @@ const sendEmailsToAll = async (req, res) => {
     
     const campaignId = Date.now().toString();
     
-    const getRandomDelay = () => {
-      const minDelay = 420000; // 7 min
-      const maxDelay = 600000; // 10 min
-      return Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-    };
+   const getRandomDelay = () => {
+  const minDelay = 180000; // 3 min
+  const maxDelay = 240000; // 4 min
+  return Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+};
+
 
     
     for (let i = 0; i < emails.length; i++) {
