@@ -3699,17 +3699,7 @@ const downloadResumeFromSupabase = async (fileName, bucketName = 'resumes') => {
   }
 };
 
-// Helper function to clean up temporary files
-const cleanupTempFile = (filePath) => {
-  try {
-    if (filePath && fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log('🗑️  Cleaned up temporary file:', filePath);
-    }
-  } catch (error) {
-    console.error('Error cleaning up temp file:', error.message);
-  }
-};
+
 
 // ========== END HELPER FUNCTIONS ==========
 
