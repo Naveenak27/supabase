@@ -1018,8 +1018,21 @@ app.use(cors({
 }));
 
 // For parsing JSON and URL-encoded data
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// IMPORTANT: Skip these parsers for multipart/form-data requests (file uploads).
+// If express.urlencoded() runs on a multipart request it drains the stream,
+// so multer receives an empty body and saves a corrupted ~644-byte file.
+app.use((req, res, next) => {
+  if (req.headers["content-type"] && req.headers["content-type"].startsWith("multipart/form-data")) {
+    return next();
+  }
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.headers["content-type"] && req.headers["content-type"].startsWith("multipart/form-data")) {
+    return next();
+  }
+  express.urlencoded({ extended: true })(req, res, next);
+});
 
 
 
@@ -1597,16 +1610,9 @@ app.delete('/api/email-templates/:id', async (req, res) => {
 // ========================================
 // EMAIL SENDING ROUTE
 // ========================================
-// Handled by apiRouter: POST /api/send-emails → sendEmailsToAll (emailSender.js)
+// Handled by apiRouter: POST /api/send-emails -> sendEmailsToAll (emailSender.js)
 // That function uses its own disk-storage multer (resumeUpload) to save the file,
 // reads it as base64, and attaches it via Brevo. Do NOT add a duplicate route here.
-
-
-
-
-
-
-// Get all resumes
 app.get('/api/resumes', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1850,7 +1856,3 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Email logs available at: http://localhost:${PORT}/api/logs`);
 });
-
-
-
-
