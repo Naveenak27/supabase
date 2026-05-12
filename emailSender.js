@@ -3890,8 +3890,8 @@ const sendEmailsToAll = async (req, res) => {
     const campaignId = Date.now().toString();
     
   const getRandomDelay = () => {
- const minDelay = 30000;  // 30 sec
-  const maxDelay = 60000;  // 1 min
+ const minDelay = 180000; // 3 min
+  const maxDelay = 240000; // 4 min
   return Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 };
 
